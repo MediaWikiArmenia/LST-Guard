@@ -1,8 +1,8 @@
 # WikiCorrector
-> Watchdogs recent edits in a MediaWiki project
+> WikiCorrect watchdogs recent edits in a MediaWiki project
 
 
 This is a simple MediaWiki bot that "watchdogs"  Recentchanges to detect (un)desired
 edits. The current version is developed to detect edits that disrupt template inclusions.
 
-![](https://commons.wikimedia.org/wiki/File:Bote_Boas_Vindas2.png)
+![](https://upload.wikimedia.org/wikipedia/commons/b/b3/Bote_Boas_Vindas2.png)
