@@ -10,7 +10,7 @@ class HtmlParser:
     def __init__(self):
         self.trcontents = []
         self.recentchanges = ''
-        f = open('sandbox_.html', 'r')
+        f = open('sandbox_.html', 'r') #This is just for play, final version should get data from api
         for line in f:
             self.recentchanges += line
         f.close()
