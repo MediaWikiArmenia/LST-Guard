@@ -6,16 +6,26 @@ and produce a machine-readable data: a list of dictionaries with the
 revisioned text as strings.
 """
 
+import re
+
 class HtmlParser:
     def __init__(self):
-        self.trcontents = []
         self.recentchanges = ''
-        f = open('sandbox_.html', 'r') #This is just for play, final version should get data from api
-        for line in f:
-            self.recentchanges += line
+        f = open('sandbox6.txt', 'r') #This is just for play, final version should get data from api
+        self.recentchanges = f.readline()
+        print(self.recentchanges)
         f.close()
 
     def run(self):
+        print('works!')
+        table = self.item_split(self.recentchanges)
+        print(type(table))
+        print(table)
+        for item in table:
+            print('item in table')
+            self.all_split(item)
+
+        """
         # split all <tr> tags into elements in a list
         table_tr = self.tr_split(self.recentchanges)
         print(table_tr)
@@ -25,6 +35,41 @@ class HtmlParser:
             table_td.append(self.td_split(tr))
             del tr
         print(table_td)
+        """
+        return
+
+    def all_split(self, content):
+        print('all print!')
+        item = {}
+        # should return dict:
+        # {'title': xx, 'link': xx, 'date': xx, 'user': xx, 'comment': xx, 'diffs': {'old': [xx], 'new': [xx]]}
+        table = content.split('<link>')
+        item['title'] = table[0].split('<title>')[1].split('</title>')[0]
+        table = table[1].split('</link>')
+        item['link'] = table[0]
+        table = table[1].split('<description>')[1].split('</description>')
+        item['comment'], item['diffs'] = self.parse_diffs(table[0])
+        table = table[1].split('<pubDate>')[1].split('</pubDate>')
+        item['date'] = table[0]
+        table = table[1].split('<dc:creator>')[1].split('</dc:creator>')
+        item['user'] = table [0]
+        print(item)
+        return
+
+    def parse_diffs(self, content):
+        comment, table = content.split('</p>', 1)
+        print(table)
+        return self.clean_tags(comment), 'DIFF'
+
+    def clean_tags(self, content):
+        cleantext = re.sub('<.*?>', '', content)
+        cleantext = re.sub('\\\\x..', '', cleantext)
+        return cleantext
+
+    def item_split(self, content):
+        table = content #.split['<item>']
+        table2 = table.split('<item>')[1:]
+        return table2
 
     def td_split(self, content):
         tr = []
@@ -97,5 +142,5 @@ class HtmlParser:
         return result
 
 if __name__ == "__main__":
-    diffs = DiffTokenizer()
+    diffs = HtmlParser()
     diffs.run()
