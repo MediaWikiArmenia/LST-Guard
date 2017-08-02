@@ -1,9 +1,9 @@
 import json, requests
 
-def get_transclusions(title):
+def get_transclusions(title, url):
     parameters = {'action': 'query', 'prop': 'transcludedin', 'titles': title,
         'format': 'json', 'utf8': '', 'tinamespace': '*'} #TODO change ns to 0
-    resp = (requests.get('https://hy.wikisource.org/w/api.php', params = parameters))
+    resp = (requests.get(url, params = parameters))
 
     js = json.loads(resp.content.decode('utf-8'))
     #print('TRANSCLUDEDIN:', js)

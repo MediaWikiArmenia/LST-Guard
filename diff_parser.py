@@ -1,7 +1,7 @@
 import json, requests
 
-def get_revisions(revision, domain):
-    url = 'https://' + domain + '/w/api.php'
+def get_revisions(revision, url):
+
     parameters = {'action': 'query', 'prop': 'revisions', 'rvprop': 'content',
         'format': 'json', 'utf8': '', 'revids': str(revision['old']) + '|' + str(revision['new']) }
     resp = (requests.get(url, params = parameters))
