@@ -1,43 +1,29 @@
+import json, requests
 
-def get_revisions(revision, title):
-    #USED METHODS: CHECK_DIFF
+def get_revisions(revision, domain):
+    url = 'https://' + domain + '/w/api.php'
     parameters = {'action': 'query', 'prop': 'revisions', 'rvprop': 'content',
         'format': 'json', 'utf8': '', 'revids': str(revision['old']) + '|' + str(revision['new']) }
-    resp = (requests.get('https://hy.wikisource.org/w/api.php', params = parameters))
+    resp = (requests.get(url, params = parameters))
     if resp.status_code != 200: #This means something went wrong.
         raise ApiError('GET /tasks/ {}'.format(resp.status_code))
 
-    js = json.loads(resp.content.decode('utf-8')) #decode to make sure armenian characters are displayed correctly
-    pid = str(js['query']['pages'].keys())[12:-3]
-    diffs = js['query']['pages'][pid]['revisions']
-    if len(diffs) == 2: #Make sure we have 2 revisions TODO: resolve this in watch_rc (item['type'] == 'edit')
-        old = diffs[0]['*']
-        new = diffs[1]['*']
-        check_diff(old, new, title)
-    else: #This means we have only 1 revision, i.e. new page is created, rather than edited
-        print(' New page: PASS')
+    js = json.loads(resp.content.decode('utf-8')) #Decode to make sure non-latin characters are displayed correctly
+    assert ('badrevids' not in js['query'].keys()), 'Incorrect revision IDs'
 
-def check_diff(old, new, title):
-    #GET_TRANSCLUSIONS
-    #CHECK_TRANSCLUSION
-    # Parsing changed section names from diff
+    pid = list(js['query']['pages'].keys()) #Find page ID(s) in json, shouldn't be more than 1
+    assert (len(pid) == 1), 'Revision IDs from different pages'
+
+    pid = pid[0]
+    diffs = js['query']['pages'][pid]['revisions']
+    old, new = diffs[0]['*'], diffs[1]['*'] #Two strings with each revision content (in wikisyntax)
+    return check_diff(old, new)
+
+def check_diff(old, new):
     changed_sections = {}
     old, new = old.splitlines(), new.splitlines()
     for a, b in zip(old, new):
-        if '<section begin=' in b and a != b:
+        if '<section begin=' in b and a != b: #TODO: addapt to syntax variations / irregularities
             a, b = a.split('"')[1], b.split('"')[1]
             changed_sections[a] = b
-
-    # Generating a list of transclusions of the edited page
-    if len(changed_sections) > 0:
-        print(' {} changed section name(s) detected: {}'.format(len(changed_sections), changed_sections))
-        transclusions = get_transclusions(title)
-        print(' Checking transclusions... {} found.'.format(len(transclusions)))
-        # Checking if changed section names occur in transclusions
-        if len(transclusions) > 0:
-            for item in transclusions:
-                check_transclusion(item, changed_sections)
-        else:
-            print(' No transclusions: PASS')
-    else:
-        print(' Everything OK: PASS')
+    return changed_sections

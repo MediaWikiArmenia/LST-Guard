@@ -1,3 +1,4 @@
+import json, requests
 
 def get_pagecontent(page_id):
     parameters = {'action': 'query', 'prop': 'revisions', 'rvprop': 'content',

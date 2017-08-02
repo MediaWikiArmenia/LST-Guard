@@ -1,3 +1,4 @@
+import json, requests
 
 def get_transclusions(title):
     parameters = {'action': 'query', 'prop': 'transcludedin', 'titles': title,
@@ -12,12 +13,11 @@ def get_transclusions(title):
         return [item['pageid'] for item in transclusions['transcludedin']]
     return [] #return empty list if no transclusions
 
-def check_transclusion(page_id, changed_sections):
-    #GET_PAGECONTENT
-    #EDIT_PAGE
-    page_content = get_pagecontent(page_id).splitlines()
+def check_transclusion(page_content, changed_sections):
+    page_content = page_content.splitlines()
     edit = False
-    #print(page_content)
+
+    # If old section name found replace with new section name
     for line in page_content:
         if '<pages index=' in line:
             index = page_content.index(line)
@@ -29,7 +29,5 @@ def check_transclusion(page_id, changed_sections):
     page_content = '\n'.join(page_content)
 
     if edit == True:
-        edit_page(page_id, page_content)
-        print(' 1 transclusion corrected! DONE')
-    else:
-        print(' No corrections made. PASS')
+        return page_content
+    return '' # Return empty string if no edit in page necessary
