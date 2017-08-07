@@ -21,7 +21,8 @@ def run(lang = 'hy', project = 'wikisource'):
                 pass
             # Consider only edits in specified project/lang and in namespace 104 (Page:***)
             else:
-                if (item['server_name'], item['type'], item['namespace']) == (domain, 'edit', 104):
+                #if (item['server_name'], item['type'], item['namespace']) == (domain, 'edit', 104):
+                if (item['server_name'], item['type']) == (domain, 'edit'):
                 # IF YOU ARE TESTING, REMOVE THE NAMESPACE CONDITIONAL AND TEST ON USER SUBPAGES AND SANDBOXES
                     print('New revision in page "{}". Checking...'.format(item['title']))
                     check_revision(item, url)
