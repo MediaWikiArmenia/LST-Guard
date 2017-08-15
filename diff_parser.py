@@ -1,5 +1,27 @@
 import json, requests
 
+# HTML syntax of section labels
+section_label = {       'de': '<Abschnitt Anfang=',     #both english and german syntax used
+                        'en': '<section begin=',
+                        'es': '<sección comienzo=',     #?, only English used
+                        'hy': '<բաժին սկիզբ=',          #only English used
+                        'pt': '<trecho começo=' }       #only English used
+
+# HTML transclusion syntax (used by all languages)
+html_labels = ['<pages index=', 'fromsection=', 'tosection']
+
+# Mediawiki transclusion syntax
+mediawiki_labels = ['#lst:', '#lstx:']
+
+# Localized template name and parmeter(s) for section name
+transclusion_labels = {
+                        'de': [],
+                        'en': ['Page', 'section', 'section-x'],
+                        'es': ['Inclusión', 'sección', 'section', 'section-x'],
+                        'hy': ['Էջ', 'բաժին', 'բաժին-x'],
+                        'pt': ['Página', 'seção']   }
+
+
 def get_revisions(revision, url):
 
     parameters = {'action': 'query', 'prop': 'revisions', 'rvprop': 'content',
@@ -23,7 +45,7 @@ def check_diff(old, new):
     changed_sections = {}
     old, new = old.splitlines(), new.splitlines()
     for a, b in zip(old, new):
-        if '<section begin=' in b and a != b: #TODO: addapt to syntax variations / irregularities
+        if '<section begin=' in b and a != b: #TODO: adapt to syntax variations / irregularities
             a, b = a.split('"')[1], b.split('"')[1]
             changed_sections[a] = b
     return changed_sections
