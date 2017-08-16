@@ -19,7 +19,7 @@ def check_transclusion(page_content, changed_sections):
 
     # If old section name found replace with new section name
     for line in page_content:
-        if '<pages index=' in line:
+        if '<pages index=' in line: #TODO make sure template includes page!!
             index = page_content.index(line)
             for section in changed_sections.keys():
                 if section in line:
