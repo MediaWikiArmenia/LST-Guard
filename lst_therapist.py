@@ -123,7 +123,7 @@ def get_pagecontent(page_id, url):
 def edit_page(page_id, page_content, url, lang):
     #see https://www.mediawiki.org/wiki/Manual:Bot_passwords
     username = ''
-    password = ''
+    password = '    '
     session = requests.Session()
 
     summaries = {   'en': 'Bot: fix broken section transclusion',
