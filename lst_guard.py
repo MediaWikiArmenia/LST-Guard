@@ -50,7 +50,7 @@ def check_edit(item, url, lang):
         print(' Saving to check transclusions: DONE')
         data = {'title': item['title'], 'lang': lang, 'url': url, 'labels': changed_labels }
         with open('detected_pages.txt', 'a') as file:
-            file.write(str(data) + '\n')
+            file.write(json.dumps(data) + '\n')
 
 def check_diff(revision, url, lang):
     old_text, new_text = get_diff(revision, url)

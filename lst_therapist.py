@@ -1,14 +1,24 @@
+"""
+Checks transclusions of pages in the file "detected_pages.txt". Fixes transclusions
+if they are broken (i.e. replaces old section labels with new ones). Cleans file
+after each check (every 3 minutes).
+"""
+
 import json, requests, time
 from getpass import getpass
 
 def run():
     while True:
-        time.sleep(180) # 3 minutes between each check
+        time.sleep(180) # Sleep 3m between each check
+        data = []
         print('Checking saved transclusions...')
         with open('detected_pages.txt', 'r+') as file:
             try:
-                data = file.readlines()
+                for line in file:
+                    item = json.loads(line)
+                    data.append(item)
             finally:
+                file.truncate(0) # Clean file
                 file.close()
         if len(data) != 0:
             for item in data:
@@ -17,11 +27,11 @@ def run():
                     print(' No transclusions of "{}": PASS'.format(item['title']))
                 else:
                     for tr in transclusions:
-                        print(' Checking transclusions of "{}"...'.format(item['title'])')
+                        print(' Checking transclusions of "{}"...'.format(item['title']))
                         # Get source code of transcluding page
                         page_content = get_pagecontent(tr, item['url'])
                         # Updates section names if necessary, otherwise retruns empty string
-                        page_content = check_transclusion(page_content, changed_sections)
+                        page_content = fix_transclusion(page_content, item['title'], item['labels'], item['lang'])
                         if page_content == '':
                             print(' No corrections made. PASS')
                         else:
@@ -42,7 +52,57 @@ def get_transclusions(title, url):
     transclusions = js['query']['pages'][pid]
     if 'transcludedin' in transclusions.keys():
         return [item['pageid'] for item in transclusions['transcludedin']]
-    return [] #return empty list if no transclusions
+    return [] # Return empty list if no transclusions
+
+def fix_transclusion(page_content, title, labels, lang):
+    # HTML transclusion syntax (used by all languages)
+    html = ['<pages index=', 'fromsection=', 'tosection=']
+    # Mediawiki transclusion syntax
+    mediawiki = ['#lst:', '#lstx:']
+    # Localized template name and parmeter(s) for section name
+    templates = {           'de': ['Seite', 'Abschnitt'], # not used
+                            'en': ['Page', 'section', 'section-x'],
+                            'es': ['Inclusión', 'sección', 'section', 'section-x'],
+                            'hy': ['Էջ', 'բաժին', 'բաժին-x'],
+                            'pt': ['Página', 'seção']   }
+
+    page_content = page_content.splitlines()
+    edit = False
+
+    # If old section name found replace with new section name
+    for line in page_content:
+        if title in line:
+            index = page_content.index(line)
+            template = '{{' + templates[lang][0] + '|'
+            # Case 1: html syntax is used for transclusion
+            if html[0] in line:
+                for label in labels.keys():
+                    if label in line: #TODO: deal label as a seperate word
+                        edit = True
+                        line = line.replace(label, labels[label])
+                        page_content[index] = line
+            # Case 2: mediawiki syntax is used for transclusion
+            elif mediawiki[0] in line or mediawiki[1] in line:
+                for label in labels.keys():
+                    label = '|' + label + '}}'
+                    newlabel = '|' + labels[label] + '}}'
+                    if label in line:
+                        edit = True
+                        line = line.replace(label, new_label)
+                        page_content[index] = line
+            # Case 3: template is used for transclusion
+            elif template in line:
+                for label in labels.keys():
+                    label = '=' + label + '}}' #TODO: deal with cases when section isn't last parameter!
+                    newlabel = '=' + labels[label] + '}}'
+                    if label in line:
+                        edit = True
+                        line = line.replace(label, new_label)
+                        page_content[index] = line
+    page_content = '\n'.join(page_content)
+    if edit == True:
+        return page_content
+    return '' # Return empty string if no edit in page necessary
 
 def get_pagecontent(page_id, url):
     parameters = {  'action': 'query',
@@ -60,25 +120,6 @@ def get_pagecontent(page_id, url):
     pid = str(js['query']['pages'].keys())[12:-3]
     return js['query']['pages'][pid]['revisions'][0]['*']
 
-def check_transclusion(page_content, changed_sections):
-    page_content = page_content.splitlines()
-    edit = False
-
-    # If old section name found replace with new section name
-    for line in page_content:
-        if '<pages index=' in line: #TODO make sure template includes page!!
-            index = page_content.index(line)
-            for section in changed_sections.keys():
-                if section in line:
-                    edit = True
-                    line = line.replace(section, changed_sections[section])
-                    page_content[index] = line
-    page_content = '\n'.join(page_content)
-
-    if edit == True:
-        return page_content
-    return '' # Return empty string if no edit in page necessary
-
 def edit_page(page_id, page_content, url, lang):
     #see https://www.mediawiki.org/wiki/Manual:Bot_passwords
     username = ''
@@ -87,7 +128,7 @@ def edit_page(page_id, page_content, url, lang):
 
     summaries = {   'en': 'Bot: fix broken section transclusion',
                     'es': 'Bot: arreglo de los nombres de sección de la transclusión',
-                    'de': 'Bot: Korrigiere Abschnittsnamen von Einbindung'
+                    'de': 'Bot: Korrigiere Abschnittsnamen von Einbindung',
                     'hy': 'Բոտ․ ներառված բաժնի անվան ուղղում',
                     'pt': 'bot: corrigir nomes de seção' }
 
@@ -122,7 +163,6 @@ def edit_page(page_id, page_content, url, lang):
                 'type': 'csrf',
                 'format': 'json'})
     # Edit page
-    global summaries
     resp3 = session.post(url, data = {
                 'action': 'edit',
                 'pageid': page_id,
@@ -132,3 +172,6 @@ def edit_page(page_id, page_content, url, lang):
                 'utf8': '',
                 'bot': 1,
                 'token': resp2.json()['query']['tokens']['csrftoken']})
+
+if __name__ == '__main__':
+    run()
