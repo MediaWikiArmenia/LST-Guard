@@ -1,10 +1,14 @@
-import json
-from sseclient import SSEClient as EventSource
+import lst_guard, lst_therapist
+from multiprocessing import Process
 
-from diff_parser import get_revisions
-from check_transclusions import get_transclusions, check_transclusion
-from access_page import get_pagecontent, edit_page
+def start_guard():
+    lst_guard.run()
 
+def start_therapist():
+    lst_therapist.run()
 
 if __name__ == '__main__':
-    run()
+    guard = Process(target=start_guard)
+    guard.start()
+    therapist = Process(target=start_therapist)
+    therapist.start()
