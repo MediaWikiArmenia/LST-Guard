@@ -47,7 +47,7 @@ def check_edit(item, url, lang):
         print(' No changed labels: PASS')
     else:
         print(' {} changed label(s) detected...'.format(len(changed_labels)))
-        print(' Saving to correct transclusions later.')
+        print(' Saving to check transclusions: DONE')
         data = {'title': item['title'], 'lang': lang, 'url': url, 'labels': changed_labels }
         with open('detected_pages.txt', 'a') as file:
             file.write(str(data) + '\n')
