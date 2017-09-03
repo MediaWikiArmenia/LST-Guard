@@ -7,25 +7,26 @@ lables in pages that transclude these sections.
 Currently supported languages are: German, English, Spanish, Armenian, Portuguese.
 """
 
-import json, requests
+# Supported projects and languages
+global projects, languages
+projects = ['wikisource', 'wikipedia', 'wiktionary']
+languages = ['de', 'en', 'es', 'hy', 'pt']
+
+import json, requests, time, re
 from sseclient import SSEClient as EventSource
 
-def run(project = '', lang = ''):
-    # Identify project which will be watched
-    supported_projects = ['wikisource']
-    supported_languages = ['de', 'en', 'es', 'hy', 'pt']
-    if project is False:
-        project = input('Enter project (eg.: "wikisource"): ').lower()
-    assert (project in supported_projects), 'Not supported project'
-    if lang is False:
-        lang = input('Enter language code (eg. "de"): ').lower()
-    assert (lang in supported_languages), 'Not supported language'
+def run(proj, langs): # Respectively: string and list
 
-    domain = lang + '.' + project + '.org'
-    url = 'https://' + domain + '/w/api.php'
-    print('Watching recent changes in {}'.format(domain))
+    # Identify project which will be watched
+    if not proj:
+        proj = input('Enter project (eg.: "wikisource"): ').lower()
+    assert (proj in projects), 'Not supported project'
+    if not langs:
+        langs = input('Enter language code(s) (eg. "de"): ').lower()
+    assert (l in languages for l in langs), 'Not supported language(s)'
 
     # Start watching recent changes
+    print('Watching recent changes in {} ({})'.format(proj, ', '.join(langs)))
     for event in EventSource('https://stream.wikimedia.org/v2/stream/recentchange'):
         if event.event == 'message':
             try:
@@ -33,14 +34,18 @@ def run(project = '', lang = ''):
             except ValueError:
                 pass
             else:
-                # Pick edits in specified domain and in namespace 104 (i.e. "Page:")
-                if (item['server_name'], item['type'], item['namespace']) == (domain, 'edit', 104):
-                    print('New revision in page "{}". Checking...'.format(item['title']))
-                    check_edit(item, url, lang)
+                server = item['server_name'].split('.')
+                if server[0] in langs and server[1] == proj and item['type'] == 'edit':
+                    print('New revision in page "{}" ({}).\nChecking...'.format(item['title'], server[0]))
+                    check_edit(item)
 
-def check_edit(item, url, lang):
+def check_edit(item):
+    revids = item['revision']   #revision ids
+    url = item['server_url']
+    lang = item['server_name'].split('.')[0]
+
     # See if there are changed labels in revision
-    changed_labels = check_diff(item['revision'], url, lang)
+    changed_labels = check_revision(revids, url, lang)
 
     # If ther are changed labels write to file
     if len(changed_labels) == 0:
@@ -50,10 +55,10 @@ def check_edit(item, url, lang):
         print(' Saving to check transclusions: DONE')
         data = {'title': item['title'], 'lang': lang, 'url': url, 'labels': changed_labels }
         with open('detected_pages.txt', 'a') as file:
-            file.write(json.dumps(data) + '\n')
+            file.write(json.dumps(data, ensure_ascii=False) + '\n')
 
-def check_diff(revision, url, lang):
-    old_text, new_text = get_diff(revision, url)
+def check_revision(revids, url, lang):
+    old_text, new_text = get_diff(revids, url)
     old_labels = get_labels(old_text, lang)
     new_labels = get_labels(new_text, lang)
     changed_labels = {}
@@ -62,50 +67,60 @@ def check_diff(revision, url, lang):
         for old, new in zip(old_labels, new_labels):
             if old != new:
                 changed_labels[old] = new
-    return changed_labels
+    return changed_labels # Returns empty dict if nothing is detected
 
-def get_labels(wikitext, lang):
-    labels = []
-    # Syntax of section labels
-    syntax = {              'de': '<Abschnitt Anfang=',     #both english and german syntax are used
-                            'en': '<section begin=',
-                            'es': '<sección comienzo=',     #?, only English used
-                            'hy': '<բաժին սկիզբ=',          #only English used
-                            'pt': '<trecho começo=' }       #only English used
-    for line in wikitext.splitlines():
-        #Check for localized syntax
-        if syntax[lang] in line:
-            label = line.split(syntax[lang])[1].split('/>')[0] # Split to get label
-            label = label.strip('" ') # Remove brackets and whitespace
-            labels.append(label)
-        #Check for English syntax
-        elif syntax['en'] in line:
-            label = line.split(syntax['en'])[1].split('/>')[0]
-            label = label.strip('" ')
-            labels.append(label)
-    return labels
-
-def get_diff(revision, url):
-    parameters = {      'action': 'query',
+def get_diff(revids, url):
+    url += '/w/api.php'
+    resp = (requests.get(url, params = {
+                        'action': 'query',
                         'prop': 'revisions',
                         'rvprop': 'content',
                         'format': 'json',
                         'utf8': '',
-                        'revids': str(revision['old']) + '|' + str(revision['new']) }
-    resp = (requests.get(url, params = parameters))
+                        'revids': str(revids['old']) + '|' + str(revids['new'])
+                        }))
     if resp.status_code != 200: #This means something went wrong.
         raise ApiError('GET /tasks/ {}'.format(resp.status_code))
 
     js = json.loads(resp.content.decode('utf-8')) # Decode to make sure non-latin characters are displayed correctly
     assert ('badrevids' not in js['query'].keys()), 'Incorrect revision IDs'
 
-    pid = list(js['query']['pages'].keys()) # Find page ID(s) in json, shouldn't be more than 1
-    assert (len(pid) == 1), 'Revision IDs from different pages'
+    pageid = list(js['query']['pages'].keys()) # Find page id(s) in json, shouldn't be more than 1
+    assert (len(pageid) == 1), 'Revision IDs from different pages'
+    pageid = pageid[0]
+    diffs = js['query']['pages'][pageid]['revisions']
 
-    pid = pid[0]
-    diffs = js['query']['pages'][pid]['revisions']
+    return diffs[0]['*'], diffs[1]['*'] # Two strings with revision content (in wikisyntax)
 
-    return diffs[0]['*'], diffs[1]['*'] #Two strings with each revision content (in wikisyntax)
+def get_labels(wikitext, lang):
+    labels = []
+    # Syntax of section labels
+    syntax = {              'de': '<Abschnitt Anfang=',     #both english and german syntaxes are used
+                            'en': '<section begin=',
+                            'es': '<sección comienzo=',     #?, only English used
+                            'hy': '<բաժին սկիզբ=',          #only English used
+                            'pt': '<trecho começo=' }       #only English used
+    for line in wikitext.splitlines():
+        #Check localized and English syntax labeling
+        if syntax[lang] in line or syntax['en'] in line:
+            # Some regex to deal with syntactic irregularietes (brackets, whitespace)
+            label = re.search(r'[{}{}]\s?=\s?"?(.*?)"?\s?/>'.format(syntax['en'], syntax[lang]), line)
+            if label:
+                labels.append(label.groups()[0])
+    print(labels)
+    return labels
 
 if __name__ == '__main__':
-    run('wikisource', 'hy')
+
+    edit = {"bot": False,
+    "comment":"",
+    "namespace":0,
+    "revision":{"new":165963,"old":165580},
+    "server_name":"hy.wikisource.org",
+    "server_url":"https://hy.wikisource.org",
+    "title":"Մասնակից:Vacio/Սևագրություն",
+    "type":"edit",
+    "user":"Vacio",
+    "wiki":"hywiki"}
+
+    check_edit(edit)
