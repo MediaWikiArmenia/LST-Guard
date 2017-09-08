@@ -118,5 +118,4 @@ def get_labels(wikitext, lang):
             label = re.search(r'[{}{}]\s?=\s?"?(.*?)"?\s?/>'.format(syntax['en'], syntax[lang]), line)
             if label:
                 labels.append(label.groups()[0])
-    print(labels)
     return labels
