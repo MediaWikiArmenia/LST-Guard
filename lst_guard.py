@@ -6,16 +6,15 @@ lables in pages that transclude these sections.
 
 Currently supported languages are: German, English, Spanish, Armenian, Portuguese.
 """
+import json, requests, time, re, redis
+from sseclient import SSEClient as EventSource
 
 # Supported projects and languages
 global projects, languages
 projects = ['wikisource', 'wikipedia', 'wiktionary']
 languages = ['de', 'en', 'es', 'hy', 'pt']
 
-import json, requests, time, re
-from sseclient import SSEClient as EventSource
-
-def run(proj, langs): # Respectively: string and list
+def run(proj, langs): # Arguments are respectively string and list
 
     # Identify project which will be watched
     if not proj:
@@ -41,7 +40,7 @@ def run(proj, langs): # Respectively: string and list
 
 def check_edit(item):
     revids = item['revision']   #revision ids
-    url = item['server_url']
+    url = item['server_url'] + '/w/api.php'
     lang = item['server_name'].split('.')[0]
 
     # See if there are changed labels in revision
@@ -52,10 +51,23 @@ def check_edit(item):
         print(' No changed labels: PASS')
     else:
         print(' {} changed label(s) detected...'.format(len(changed_labels)))
-        print(' Saving to check transclusions: DONE')
         data = {'title': item['title'], 'lang': lang, 'url': url, 'labels': changed_labels }
-        with open('detected_pages.txt', 'a') as file:
-            file.write(json.dumps(data, ensure_ascii=False) + '\n')
+        write_data(data)
+
+def write_data(new_data):
+    r = redis.StrictRedis(host='localhost', port=7777, db=0)
+    while(r.get('locked') == 'True'):
+        time.sleep(0.02)
+    r.set('locked', True)
+    if(r.get('lstdata')):
+        all_data = json.loads(r.get('lstdata').decode('utf-8'))
+    else:
+        all_data = []
+    all_data.append(new_data)
+    r.set('lstdata', json.dumps(all_data))
+    r.set('empty', False)
+    r.set('locked', False)
+    print(' Saving to check transclusions later: DONE')
 
 def check_revision(revids, url, lang):
     old_text, new_text = get_diff(revids, url)
@@ -70,7 +82,6 @@ def check_revision(revids, url, lang):
     return changed_labels # Returns empty dict if nothing is detected
 
 def get_diff(revids, url):
-    url += '/w/api.php'
     resp = (requests.get(url, params = {
                         'action': 'query',
                         'prop': 'revisions',
@@ -109,18 +120,3 @@ def get_labels(wikitext, lang):
                 labels.append(label.groups()[0])
     print(labels)
     return labels
-
-if __name__ == '__main__':
-
-    edit = {"bot": False,
-    "comment":"",
-    "namespace":0,
-    "revision":{"new":165963,"old":165580},
-    "server_name":"hy.wikisource.org",
-    "server_url":"https://hy.wikisource.org",
-    "title":"Մասնակից:Vacio/Սևագրություն",
-    "type":"edit",
-    "user":"Vacio",
-    "wiki":"hywiki"}
-
-    check_edit(edit)
