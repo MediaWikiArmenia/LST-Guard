@@ -34,8 +34,9 @@ def run(proj, langs): # Arguments are respectively string and list
                 pass
             else:
                 server = item['server_name'].split('.')
+                #TODO add namespace filter
                 if server[0] in langs and server[1] == proj and item['type'] == 'edit':
-                    print('New revision in page "{}" ({}).\nChecking...'.format(item['title'], server[0]))
+                    print('New revision in page "{}" ({}).\n Checking...'.format(item['title'], server[0]))
                     check_edit(item)
 
 def check_edit(item):
@@ -43,7 +44,7 @@ def check_edit(item):
     url = item['server_url'] + '/w/api.php'
     lang = item['server_name'].split('.')[0]
 
-    # See if there are changed labels in revision
+    # See if there are changed labels in revision (returns a dict)
     changed_labels = check_revision(revids, url, lang)
 
     # If ther are changed labels write to file
@@ -56,13 +57,26 @@ def check_edit(item):
 
 def write_data(new_data):
     r = redis.StrictRedis(host='localhost', port=7777, db=0)
-    while(r.get('locked') == 'True'):
+    while(r.get('locked') == 'True'): #Because redis stores this as a string
         time.sleep(0.02)
     r.set('locked', True)
+
+    # Load older data if necessary
     if(r.get('lstdata')):
         all_data = json.loads(r.get('lstdata').decode('utf-8'))
     else:
         all_data = []
+
+    # Check for identical lables
+    if len(all_data) > 0:
+        for old_data in all_data:
+            for oldl, newl in zip(list(old_data['labels'].keys()), list(old_data['labels'].values())):
+                if newl in new_data['labels'].keys():
+                    if oldl == new_data['labels'][newl]: # This means label is changed back (reverted)
+                        old_data['labels'].pop(oldl)
+                    else: # This means label is changed to something else
+                        old_data['labels'][oldl] = new_data['labels'][newl]
+
     all_data.append(new_data)
     r.set('lstdata', json.dumps(all_data))
     r.set('empty', False)
