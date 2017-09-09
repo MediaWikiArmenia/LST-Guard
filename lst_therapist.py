@@ -4,11 +4,18 @@ if they are broken (i.e. replaces old section labels with new ones). Cleans file
 after each check (every 3 minutes).
 """
 
+""" NOTE TO SELF: REMOVE LOGIN DATA BEFORE COMMIT """
+
 import json, requests, time, redis
 from getpass import getpass
+from configparser import ConfigParser
 
-global r
+global r, username, password
 r = redis.StrictRedis(host='localhost', port=7777, db=0)
+config = ConfigParser()
+config.readfp(open(r'config.ini'))
+username = config.get('credentials', 'username')
+password = config.get('credentials', 'password')
 
 def run():
     while True:
@@ -78,7 +85,6 @@ def fix_transclusion(page_content, title, labels, lang):
     for line in page_content:
         if title in line:
             index = page_content.index(line)
-            template = '{{' + templates[lang][0] + '|'
             # Case 1: html syntax is used for transclusion
             if html[0] in line:
                 for label in labels.keys():
@@ -96,6 +102,7 @@ def fix_transclusion(page_content, title, labels, lang):
                         line = line.replace(label, new_label)
                         page_content[index] = line
             # Case 3: template is used for transclusion
+            template = '{{' + templates[lang][0] + '|'
             elif template in line:
                 for label in labels.keys():
                     label = '=' + label + '}}' #TODO: deal with cases when section isn't last parameter!

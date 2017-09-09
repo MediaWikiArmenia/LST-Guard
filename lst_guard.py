@@ -8,20 +8,25 @@ Currently supported languages are: German, English, Spanish, Armenian, Portugues
 """
 import json, requests, time, re, redis
 from sseclient import SSEClient as EventSource
+from configparser import ConfigParser
 
 # Supported projects and languages
-global projects, languages
-projects = ['wikisource', 'wikipedia', 'wiktionary']
-languages = ['de', 'en', 'es', 'hy', 'pt']
+global supported_projects, supported_languages, run_on_project, run_on_languages
+config = ConfigParser()
+config.readfp(open(r'config.ini'))
+supported_projects = config.get('supported', 'projects').split()
+supported_languages = config.get('supported', 'languages').split()
+run_on_project = config.get('run on', 'project')
+run_on_languages = config.get('run on', 'languages').split()
 
 def run(proj, langs): # Arguments are respectively string and list
 
     # Identify project which will be watched
     if not proj:
-        proj = input('Enter project (eg.: "wikisource"): ').lower()
+        proj = run_on_project
     assert (proj in projects), 'Not supported project'
     if not langs:
-        langs = input('Enter language code(s) (eg. "de"): ').lower()
+        langs = run_on_languages
     assert (l in languages for l in langs), 'Not supported language(s)'
 
     # Start watching recent changes
@@ -135,4 +140,4 @@ def get_labels(wikitext, lang):
     return labels
 
 if __name__ == '__main__':
-    run('wikisource', ['hy'])
+    run()
