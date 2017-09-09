@@ -57,15 +57,15 @@ def check_edit(item):
 
 def write_data(new_data):
     r = redis.StrictRedis(host='localhost', port=7777, db=0)
-    while(r.get('locked') == 'True'): #Because redis stores this as a string
+    while r.get('locked') == 'True':
         time.sleep(0.02)
     r.set('locked', True)
 
     # Load older data if necessary
-    if(r.get('lstdata')):
-        all_data = json.loads(r.get('lstdata').decode('utf-8'))
-    else:
+    if r.get('empty') == 'True':
         all_data = []
+    else:
+        all_data = json.loads(r.get('lstdata').decode('utf-8')) # List with dicts
 
     # Check for identical lables
     if len(all_data) > 0:
@@ -133,3 +133,6 @@ def get_labels(wikitext, lang):
             if label:
                 labels.append(label.groups()[0])
     return labels
+
+if __name__ == '__main__':
+    run('wikisource', ['hy'])

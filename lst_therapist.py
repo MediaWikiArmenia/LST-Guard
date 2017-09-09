@@ -4,23 +4,25 @@ if they are broken (i.e. replaces old section labels with new ones). Cleans file
 after each check (every 3 minutes).
 """
 
-import json, requests, time
+import json, requests, time, redis
 from getpass import getpass
+
+global r
+r = redis.StrictRedis(host='localhost', port=7777, db=0)
 
 def run():
     while True:
-        time.sleep(180) # Sleep 3m between each check
-        data = []
-        print('Checking saved transclusions...')
-        with open('detected_pages.txt', 'r+') as file:
-            try:
-                for line in file:
-                    item = json.loads(line)
-                    data.append(item)
-            finally:
-                file.truncate(0) # Clean file
-                file.close()
-        if len(data) != 0:
+        while r.get('locked') == 'True':
+            time.sleep(0.02)
+        if r.get('empty') == 'False':
+            r.set('locked', True)
+            data = json.loads(r.get('lstdata').decode('utf-8')) # List with dicts
+            r.delete('lstdata')
+            r.set('empty', True)
+            r.set('locked', False)
+            print('Checking saved labels...')
+
+            # Check each item and update transclusions if necessary
             for item in data:
                 transclusions = get_transclusions(item['title'], item['url'])
                 if len(transclusions) == 0:
@@ -35,10 +37,11 @@ def run():
                         if page_content == '':
                             print(' No corrections made. PASS')
                         else:
-                            edit_page(tr, page_content, item['url'], item['lang']) #TODO: return something to indicate edit was successful/fail?
+                            edit_page(tr, page_content, item['url'], item['lang']) #TODO: Return something to indicate edit was successful/fail?
                             print(' 1 transclusion corrected! DONE')
+            time.sleep(300)
         else:
-            print(' No transclusions to check: PASS')
+            time.sleep(300)
 
 def get_transclusions(title, url):
     parameters = {  'action': 'query',
@@ -115,17 +118,15 @@ def get_pagecontent(page_id, url):
                     'pageids': page_id }
 
     resp = (requests.get(url, params = parameters))
-
     if resp.status_code != 200:
         raise ApiError('GET /tasks/ {}'.format(resp.status_code))
+
     js = json.loads(resp.content.decode('utf-8'))
     pid = str(js['query']['pages'].keys())[12:-3]
     return js['query']['pages'][pid]['revisions'][0]['*']
 
 def edit_page(page_id, page_content, url, lang):
     #see https://www.mediawiki.org/wiki/Manual:Bot_passwords
-    username = ''
-    password = ''
     session = requests.Session()
 
     summaries = {   'en': 'Bot: fix broken section transclusion',
@@ -135,7 +136,7 @@ def edit_page(page_id, page_content, url, lang):
                     'pt': 'bot: corrigir nomes de seção' }
 
     # Ask for user login/password if necessary
-    if username == '' or password == '':
+    if not username or not password:
         username = input('Bot username: ')
         password = getpass('Password: ')
     print(' logging in as {}...'.format(username))
@@ -154,9 +155,9 @@ def edit_page(page_id, page_content, url, lang):
                 'lgname': username,
                 'lgpassword': password,
                 'lgtoken': resp0.json()['query']['tokens']['logintoken']})
-    if resp1.json()['login']['result'] != 'Success':
-        raise RuntimeError(resp1.json()['login']['reason'])
+    assert (resp1.json()['login']['result'] != 'Success'), print((resp1.json()['login']['reason']))
     print('Login successful')
+
     # Request edit token
     print(' getting edit token....')
     resp2 = session.get(url, params = {
@@ -164,6 +165,8 @@ def edit_page(page_id, page_content, url, lang):
                 'meta': 'tokens',
                 'type': 'csrf',
                 'format': 'json'})
+    #TODO: assert token successful
+
     # Edit page
     resp3 = session.post(url, data = {
                 'action': 'edit',
@@ -174,6 +177,7 @@ def edit_page(page_id, page_content, url, lang):
                 'utf8': '',
                 'bot': 1,
                 'token': resp2.json()['query']['tokens']['csrftoken']})
+    #TODO: assert edit successful
 
 if __name__ == '__main__':
     run()
