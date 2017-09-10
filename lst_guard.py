@@ -19,15 +19,15 @@ supported_languages = config.get('supported', 'languages').split()
 run_on_project = config.get('run on', 'project')
 run_on_languages = config.get('run on', 'languages').split()
 
-def run(proj, langs): # Arguments are respectively string and list
+def run(proj='', langs=''): # Arguments are respectively string and list
 
     # Identify project which will be watched
     if not proj:
         proj = run_on_project
-    assert (proj in projects), 'Not supported project'
+    assert (proj in supported_projects), 'Not supported project'
     if not langs:
         langs = run_on_languages
-    assert (l in languages for l in langs), 'Not supported language(s)'
+    assert (l in supported_languages for l in langs), 'Not supported language(s)'
 
     # Start watching recent changes
     print('Watching recent changes in {} ({})'.format(proj, ', '.join(langs)))
