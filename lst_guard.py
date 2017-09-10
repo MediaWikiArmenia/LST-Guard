@@ -62,30 +62,35 @@ def check_edit(item):
 
 def write_data(new_data):
     r = redis.StrictRedis(host='localhost', port=7777, db=0)
-    while r.get('locked') == 'True':
-        time.sleep(0.02)
-    r.set('locked', True)
+    if r.get('locked'): # Make sure 'locked' is set in Redis
+        while int(r.get('locked')):
+            time.sleep(0.02)
+    r.set('locked', 1)
 
     # Load older data if necessary
-    if r.get('empty') == 'True':
+    if not r.get('empty'):
+        r.set('empty', 1) # Make sure 'empty' is set in Redis
+    if int(r.get('empty')):
         all_data = []
     else:
         all_data = json.loads(r.get('lstdata').decode('utf-8')) # List with dicts
 
     # Check for identical lables
     if len(all_data) > 0:
-        for old_data in all_data:
+        for old_data in all_data: # dict in list
             for oldl, newl in zip(list(old_data['labels'].keys()), list(old_data['labels'].values())):
                 if newl in new_data['labels'].keys():
                     if oldl == new_data['labels'][newl]: # This means label is changed back (reverted)
                         old_data['labels'].pop(oldl)
                     else: # This means label is changed to something else
                         old_data['labels'][oldl] = new_data['labels'][newl]
+            if len(old_data['labels']) == 0:
+                all_data.pop(all_data.index(old_data))
 
     all_data.append(new_data)
     r.set('lstdata', json.dumps(all_data))
-    r.set('empty', False)
-    r.set('locked', False)
+    r.set('empty', 0)
+    r.set('locked', 0)
     print(' Saving to check transclusions later: DONE')
 
 def check_revision(revids, url, lang):
