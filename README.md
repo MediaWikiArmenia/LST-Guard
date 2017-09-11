@@ -33,7 +33,6 @@ This repository contains:
 - [Contribute](#contribute)
 - [License](#license)
 
-
 ## Background
 
 ([see MediaWiki for more info](https://www.mediawiki.org/wiki/Extension:Labeled_Section_Transclusion]))
