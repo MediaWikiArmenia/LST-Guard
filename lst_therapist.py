@@ -30,6 +30,7 @@ def run():
 
 def check_saved_data(data):
     for item in data:
+        corrections = 0
         transclusions = get_transclusions(item['title'], item['url'])
         if len(transclusions) == 0:
             print(' No transclusions of "{}": PASS'.format(item['title']))
@@ -44,7 +45,10 @@ def check_saved_data(data):
                     print(' No corrections made. PASS')
                 else:
                     edit_page(transclusion, page_content, item['url'], item['lang'], fixed_labels) #TODO: Return something to indicate edit was success/fail
+                    corrections += 1
                     print(' 1 transclusion corrected! DONE')
+        with open('log.txt', 'a') as file:
+            file.write(item['lang'] + '\n' + item['title'] + '\n' + len(transclusions) + ' transclusions' + '\n' + corrections + ' corrections' + '\n\n')
 
 def get_transclusions(title, url):
     parameters = {  'action': 'query',
