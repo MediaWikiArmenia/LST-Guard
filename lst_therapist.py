@@ -48,7 +48,7 @@ def check_saved_data(data):
                     corrections += 1
                     print(' 1 transclusion corrected! DONE')
         with open('log.txt', 'a') as file:
-            file.write(item['lang'] + '\n' + item['title'] + '\n' + len(transclusions) + ' transclusions' + '\n' + corrections + ' corrections' + '\n\n')
+            file.write(item['lang'] + '\n' + item['title'] + '\n' + str(len(transclusions)) + ' transclusions' + '\n' + str(corrections) + ' corrections' + '\n\n')
 
 def get_transclusions(title, url):
     parameters = {  'action': 'query',
