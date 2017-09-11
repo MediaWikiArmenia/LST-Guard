@@ -1,3 +1,4 @@
-redis
-configparser
-sseclient
+redis==2.10.5
+configparser=3.5.0
+sseclient==0.0.18
+requests==2.11.1
