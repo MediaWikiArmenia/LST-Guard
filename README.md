@@ -8,16 +8,9 @@
 
 LST-Guard watches recent changes in Wikimedia projects and catches edits that may result in broken links in other pages. More specifically, it catches changes in section labels and corrects them in pages that ([transclude](https://en.wikipedia.org/wiki/Transclusion)) these sections. We tried to make this software easily usable and easily adaptable.
 
-This repository contains:
-
-1. [config file](config.ini) - contains project and languages to run on, as well as user credentials to edit the Wikimedia project
-2. [app.py](app.py) - runs `lst_guard` and `lst_therapist` simultaneously
-3. [lst_guard](lst_guard.py) detects changed section labels and stores them
-4. [lst_therapist](badge) checks stored labels and corrects transclusions if necessary
-5. [requirements](requirements.txt) - dependencies necessary to run this program
-
 ## Table of Contents
 
+- [Files](#files)
 - [Background](#background)
   - [Behavior](#behavior)
 - [Supported projects and languages](#supported-projects-and-languages)
@@ -29,6 +22,16 @@ This repository contains:
 - [Contribute](#contribute)
 - [License](#license)
 
+## Files
+
+This repository contains:
+
+1. [config file](config.ini) - contains project and languages to run on, as well as user credentials to edit the Wikimedia project
+2. [app.py](app.py) - runs `lst_guard` and `lst_therapist` simultaneously
+3. [lst_guard](lst_guard.py) detects changed section labels and stores them
+4. [lst_therapist](badge) checks stored labels and corrects transclusions if necessary
+5. [requirements](requirements.txt) - dependencies necessary to run this program
+
 ## Background
 LST-Guard consists of two modules: `lst_guard` constantly watches recent changes in a Wikimedia project, detects changed section labels and stores them to be checked later. LST-Guard runs on one project (eg. Wikisource) at a time, but it can watch multiple languages.
 
@@ -36,16 +39,16 @@ The second module, `lst_therapist`, runs only on intervals (5 minutes by default
 
 Both modules are called into life by `app.py`.
 
-## Example
+### Example
 * in a Wikisource page the section label `s1` has [been changed](https://en.wikisource.org/w/index.php?title=Page:EB1911_-_Volume_15.djvu/536&diff=7006224&oldid=6576545) to `Jordan, Dorothea`.
 * the article where this section was transcluded [lost its content](https://en.wikisource.org/w/index.php?title=1911_Encyclop%C3%A6dia_Britannica/Jordan,_Wilhelm&oldid=6576548)
 * `lst_guard` detected the change in label name in the original page
 * `lst_therapist` [corrected](https://en.wikisource.org/w/index.php?title=1911_Encyclop%C3%A6dia_Britannica/Jordan,_Wilhelm&diff=next&oldid=6576548) the label in the transcluding article
 
-## Behavior
+### Behavior
 Every time a page is edited, `lst_guard` compares the old and new versions and subtracts section labels with the following syntax (including localizations and minor syntactic variations):
 
-```sh
+```html
 <section begin="Some Label" />
 ```
 When the number of section labels in the old and new versions are the same, it will assume that these correspond to each other.
@@ -53,7 +56,7 @@ When the number of section labels in the old and new versions are the same, it w
 When it comes to correcting these labels in transclusions, `lst_therapist` has to recognize three different syntaxes (again: including localizations and minor syntactic variations):
 
 HTML syntax:
-```
+```html
 <pages index="Original Page" fromsection="Some Label", tosection= "Some Label"/>
 ```
 Mediawiki syntax:
@@ -65,7 +68,7 @@ Template:
 {{page|Original Page|num=Page number|section=Some Label}}
 ```
 
-# Supported languages
+## Supported languages
 
 The current version supports 5 languages:
 * English
@@ -74,16 +77,19 @@ The current version supports 5 languages:
 * Armenian
 * Portuguese
 
-# Install
-To use LST-Guard, you need Python3 or higher. You also need Redis-server. To install the later, run `apt-get install redis-server` on a Linux machine. Then install all Python dependencies with PIP:
+## Install
+To use LST-Guard, you need Python3 or higher. You also need Redis-server. If you run a Linux machine, run this command to install Redis:
+```sh
+apt-get install redis-server
+```
 
+Then install all Python dependencies with PIP:
 ```sh
 $ pip3 install -r requirements.txt
 ```
 
-# Usage
+### Usage
 Before you run LST-Guard, you have to start Redis-server:
-
 ```sh
 $ redis-server --port 7777
 ```
@@ -100,7 +106,7 @@ $ python3 app.py wikisource en es de
 
 This will run LST-Guard on the English, Spanish and German Wikisources.
 
-## Config file
+### Config file
 
 The `config.ini` file contains the types of data. The fist, `[run on]` contains the project and the language(s) that LST-Guard will watch when run. If you run the program with command line arguments they will override the data in the config file.
 
@@ -108,15 +114,15 @@ The second section, `[supported on]`, contains the projects and languages that a
 
 Lastly, `[credentials]` is the place to add the login data of your Wikimedia bot account. Note, that these have to be obtained from [Special:BotPasswords](https://www.mediawiki.org/wiki/Manual:Bot_passwords).
 
-## log
+### Log
 A simple `log.txt` is maintained with minimal data about detected changed labels and corrections.
 
-# Further development
+## Further development
 Next stage is to expand `lst_guard` with some basic NLP to be sure that corresponding labels are correctly identified (as mentioned, current versions assumes that if the number of labels in old and new versions is the same, then they must be corresponding labels).
 
 Secondly we want to add languages, especially languages that have many article transclusions in Wikisource.
 
-# Contribute
+## Contribute
 Help us with adding new languages. Test the code and find bugs.
 
-# License
+## License
