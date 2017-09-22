@@ -121,4 +121,3 @@ Secondly we want to add languages, especially languages that have many article t
 Help us with adding new languages. Test the code and find bugs.
 
 ## License
-Of course, LST-Guard is free software (of course).
