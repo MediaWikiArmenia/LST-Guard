@@ -1,8 +1,6 @@
 
 # LST-Guard
 
-> Mediawiki bot to fix broken transclusions. Easily adaptable to similar tasks.
-
 LST-Guard watches recent changes in Wikimedia projects and catches edits that may result in broken links in other pages. More specifically, it catches changes in section labels and corrects them in pages that ([transclude](https://en.wikipedia.org/wiki/Transclusion)) these sections. We tried to make this software easily usable and easily adaptable.
 
 ## Table of Contents
@@ -86,9 +84,9 @@ $ pip3 install -r requirements.txt
 ```
 
 ### Usage
-Before you run LST-Guard, you have to start Redis-server:
+Before you run LST-Guard, you have to start Redis-server (& will run it in the background):
 ```sh
-$ redis-server --port 7777
+$ redis-server --port 7777 &
 ```
 
 Then you can start LST-Guard:
