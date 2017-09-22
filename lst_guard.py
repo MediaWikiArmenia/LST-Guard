@@ -9,6 +9,7 @@ Currently supported languages are: German, English, Spanish, Armenian, Portugues
 import json, requests, time, re, redis
 from sseclient import SSEClient as EventSource
 from configparser import ConfigParser
+from localizations import section_labels
 
 # Supported projects and languages
 global supported_projects, supported_languages, run_on_project, run_on_languages
@@ -129,17 +130,11 @@ def get_diff(revids, url):
 
 def get_labels(wikitext, lang):
     labels = []
-    # Syntax of section labels
-    syntax = {              'de': '<Abschnitt Anfang=',     #both english and german syntaxes are used
-                            'en': '<section begin=',
-                            'es': '<sección comienzo=',     #?, only English used
-                            'hy': '<բաժին սկիզբ=',          #only English used
-                            'pt': '<trecho começo=' }       #only English used
     for line in wikitext.splitlines():
-        #Check localized and English syntax labeling
-        if syntax[lang] in line or syntax['en'] in line:
+        #Check localized and English syntax labeling (since most use English)
+        if section_label[lang] in line or section_label['en'] in line:
             # Some regex to deal with syntactic irregularietes (brackets, whitespace)
-            label = re.search(r'[{}{}]\s?=\s?"?(.*?)"?\s?/>'.format(syntax['en'], syntax[lang]), line)
+            label = re.search(r'[{}{}]\s?=\s?"?(.*?)"?\s?/>'.format(section_label['en'], section_label[lang]), line)
             if label:
                 labels.append(label.groups()[0])
     return labels

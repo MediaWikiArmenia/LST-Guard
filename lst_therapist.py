@@ -6,6 +6,7 @@ after each check (every 5 minutes).
 import json, requests, time, redis
 from getpass import getpass
 from configparser import ConfigParser
+from localizations import transclusion_template, edit_summary
 
 def run():
     r = redis.StrictRedis(host='localhost', port=7777, db=0)
@@ -67,16 +68,11 @@ def get_transclusions(title, url):
     return [] # Return empty list if no transclusions
 
 def fix_transclusion(page_content, title, labels, lang):
+
     # HTML transclusion syntax (used by all languages)
-    html = ['<pages index=', 'fromsection=', 'tosection=']
+    html_transclusion = ['<pages index=', 'fromsection=', 'tosection=']
     # Mediawiki transclusion syntax
-    mediawiki = ['#lst:', '#lstx:']
-    # Localized template name and parmeter(s) for section name
-    templates = {           'de': ['Seite', 'Abschnitt'], # not used
-                            'en': ['Page', 'section', 'section-x'],
-                            'es': ['Inclusión', 'sección', 'section', 'section-x'],
-                            'hy': ['Էջ', 'բաժին', 'բաժին-x'],
-                            'pt': ['Página', 'seção']   }
+    mediawiki_transclusion = ['#lst:', '#lstx:']
 
     page_content = page_content.splitlines()
     fixed_labels = {}
@@ -88,7 +84,7 @@ def fix_transclusion(page_content, title, labels, lang):
         if title in line:
             index = page_content.index(line)
             # Case 1: html syntax is used for transclusion
-            if html[0] in line:
+            if html_transclusion[0] in line:
                 for label in labels.keys():
                     if label in line: #TODO: deal label as a seperate word
                         fixed_labels[label] = labels[label]
@@ -96,7 +92,7 @@ def fix_transclusion(page_content, title, labels, lang):
                         line = line.replace(label, labels[label])
                         page_content[index] = line
             # Case 2: mediawiki syntax is used for transclusion
-            if mediawiki[0] in line or mediawiki[1] in line:
+            if mediawiki_transclusion[0] in line or mediawiki_transclusion[1] in line:
                 for label in labels.keys():
                     label = '|' + label + '}}'
                     newlabel = '|' + labels[label] + '}}'
@@ -106,7 +102,7 @@ def fix_transclusion(page_content, title, labels, lang):
                         line = line.replace(label, new_label)
                         page_content[index] = line
             # Case 3: template is used for transclusion
-            template = '{{' + templates[lang][0] + '|'
+            template = '{{' + transclusion_template[lang][0] + '|'
             if template in line:
                 for label in labels.keys():
                     label = '=' + label + '}}' #TODO: deal with cases when section isn't last parameter!
@@ -185,15 +181,10 @@ def edit_page(page_id, page_content, url, lang, labels):
     #TODO: assert token successful
 
     # Edit page
-    summaries = {   'en': 'Bot: fix broken section transclusion',
-                    'es': 'Bot: arreglo de los nombres de sección de la transclusión',
-                    'de': 'Bot: Korrigiere Abschnittsnamen von Einbindung',
-                    'hy': 'Բոտ․ ներառված բաժնի անվան ուղղում',
-                    'pt': 'bot: corrigir nomes de seção' }
     changes = []
     for old, new in zip(labels.keys(), labels.values()):
         changes.append(old + '→' + new)
-    summary = summaries[lang] + ' (' + ', '.join(changes) + ')'
+    summary = edit_summary[lang] + ' (' + ', '.join(changes) + ')'
     resp3 = session.post(url, data = {
                 'action': 'edit',
                 'pageid': page_id,
