@@ -9,7 +9,7 @@ Currently supported languages are: German, English, Spanish, Armenian, Portugues
 import json, requests, time, re, redis
 from sseclient import SSEClient as EventSource
 from configparser import ConfigParser
-from localizations import section_labels
+from localizations import section_label
 
 # Supported projects and languages
 global supported_projects, supported_languages, run_on_project, run_on_languages

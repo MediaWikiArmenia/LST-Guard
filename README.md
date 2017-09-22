@@ -1,8 +1,5 @@
-<img src="https://upload.wikimedia.org/wikipedia/commons/thumb/b/b3/Bote_Boas_Vindas2.png/206px-Bote_Boas_Vindas2.png" align="right" width="103px" height="120"/>
 
 # LST-Guard
-
-[![lst guard](https://img.shields.io/badge/lst%20guard-mediawiki%20bot-ff69b4.svg?style=flat-square)](https://github.com/MediaWikiArmenia/LST-Guard)
 
 > Mediawiki bot to fix broken transclusions. Easily adaptable to similar tasks.
 
@@ -80,7 +77,7 @@ The current version supports 5 languages:
 ## Install
 To use LST-Guard, you need Python3 or higher. You also need Redis-server. If you run a Linux machine, run this command to install Redis:
 ```sh
-apt-get install redis-server
+$ apt-get install redis-server
 ```
 
 Then install all Python dependencies with PIP:
@@ -126,3 +123,4 @@ Secondly we want to add languages, especially languages that have many article t
 Help us with adding new languages. Test the code and find bugs.
 
 ## License
+Of course, LST-Guard is free software (of course).
