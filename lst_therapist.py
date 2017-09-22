@@ -72,7 +72,7 @@ def fix_transclusion(page_content, title, labels, lang):
     # HTML transclusion syntax (used by all languages)
     html_transclusion = ['<pages index=', 'fromsection=', 'tosection=']
     # Mediawiki transclusion syntax
-    mediawiki_transclusion = ['#lst:', '#lstx:']
+    mediawiki_transclusion = ['#lst:', '#lstx:', '#section:']
 
     page_content = page_content.splitlines()
     fixed_labels = {}
@@ -92,7 +92,7 @@ def fix_transclusion(page_content, title, labels, lang):
                         line = line.replace(label, labels[label])
                         page_content[index] = line
             # Case 2: mediawiki syntax is used for transclusion
-            if mediawiki_transclusion[0] in line or mediawiki_transclusion[1] in line:
+            if mediawiki_transclusion[0] in line or mediawiki_transclusion[1] in line: #TODO: adapt for all variations
                 for label in labels.keys():
                     label = '|' + label + '}}'
                     newlabel = '|' + labels[label] + '}}'

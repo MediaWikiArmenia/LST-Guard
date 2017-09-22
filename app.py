@@ -5,7 +5,7 @@ from multiprocessing import Process
 global lang, proj
 
 def set_args():
-    assert len(argv) <= 8, 'Too many arguments given' # max 8 args, i.e. max 6 languages
+    assert len(argv) <= 11, 'Too many arguments given' # max 11 args, i.e. max 9 languages
     global lang, proj
     if len(argv) > 2:
         proj, lang = argv[1], argv[2:]
