@@ -21,7 +21,6 @@ run_on_project = config.get('run on', 'project')
 run_on_languages = config.get('run on', 'languages').split()
 
 def run(proj='', langs=''): # Arguments are respectively string and list
-
     # Identify project which will be watched
     if not proj:
         proj = run_on_project
@@ -130,11 +129,20 @@ def get_diff(revids, url):
 
 def get_labels(wikitext, lang):
     labels = []
+    en_label = section_label['en']  # English syntax
+    loc_label = section_label[lang] # Localized syntax
+
     for line in wikitext.splitlines():
-        #Check localized and English syntax labeling (since most use English)
-        if section_label[lang] in line or section_label['en'] in line:
+        #Check localized and English syntax of labels (since most use English)
+        if loc_label and loc_label in line:
+            print(loc_label)
             # Some regex to deal with syntactic irregularietes (brackets, whitespace)
-            label = re.search(r'[{}{}]\s?=\s?"?(.*?)"?\s?/>'.format(section_label['en'], section_label[lang]), line)
+            label = re.search(r'<{}\s?=\s?"?(.*?)"?\s?/>'.format(loc_label), line)
+            if label:
+                labels.append(label.groups()[0])
+        if en_label in line:
+            print(en_label)
+            label = re.search(r'<{}\s?=\s?"?(.*?)"?\s?/>'.format(en_label), line)
             if label:
                 labels.append(label.groups()[0])
     return labels
