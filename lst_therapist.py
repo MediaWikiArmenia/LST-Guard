@@ -41,11 +41,11 @@ def check_saved_data(data):
                 # Get source code of transcluding page
                 page_content = get_pagecontent(transclusion, item['url'])
                 # Updates section names if necessary, otherwise retruns empty string
-                page_content, fixed_labels = fix_transclusion(page_content, item['title'], item['labels'], item['lang'])
+                page_content, corrected_labels = fix_transclusion(page_content, item['title'], item['labels'], item['lang'])
                 if page_content == '':
                     print(' No corrections made. PASS')
                 else:
-                    edit_page(transclusion, page_content, item['url'], item['lang'], fixed_labels) #TODO: Return something to indicate edit was success/fail
+                    edit_page(transclusion, page_content, item['url'], item['lang'], corrected_labels) #TODO: Return something to indicate edit was success/fail
                     corrections += 1
                     print(' 1 transclusion corrected! DONE')
         with open('log.txt', 'a') as file:
@@ -68,60 +68,68 @@ def get_transclusions(title, url):
     return [] # Return empty list if no transclusions
 
 def fix_transclusion(page_content, title, labels, lang):
-
-    # HTML transclusion syntax (used by all languages)
-    html_transclusion = ['<pages index=', 'fromsection=', 'tosection=']
-    # Mediawiki transclusion syntax
-    mediawiki_transclusion = ['#lst:', '#lstx:', '#section:']
-
     page_content = page_content.splitlines()
-    fixed_labels = {}
+    corrected_labels = {}
     edit = False
-    # Clean title if necessary
-    title = clean_title(title)
-    # If old section name found replace with new section name
+    title = clean_title(title) # Get rid of namespace or subpage
+
     for line in page_content:
         if title in line:
-            index = page_content.index(line)
-            # Case 1: html syntax is used for transclusion
-            if html_transclusion[0] in line:
+            index = page_content.index(line) #Remember location of each line
+
+            # Case 1: HTML syntax for transclusion
+            if line.startswith('<pages index'):
                 for label in labels.keys():
-                    if label in line: #TODO: deal label as a seperate word
-                        fixed_labels[label] = labels[label]
-                        edit = True
-                        line = line.replace(label, labels[label])
-                        page_content[index] = line
-            # Case 2: mediawiki syntax is used for transclusion
-            if mediawiki_transclusion[0] in line or mediawiki_transclusion[1] in line: #TODO: adapt for all variations
-                for label in labels.keys():
-                    label = '|' + label + '}}'
-                    newlabel = '|' + labels[label] + '}}'
                     if label in line:
-                        fixed_labels[label] = newlabel
-                        edit = True
-                        line = line.replace(label, new_label)
-                        page_content[index] = line
-            # Case 3: template is used for transclusion
-            template = '{{' + transclusion_template[lang][0] + '|'
-            if template in line:
+                        pattern = r'(<pages index\s?=\s?"?{}"?\s.*?fromsection\s?=\s?"?)({}|.*)("?\s?tosection\s?=\s?"?)({}|.*)("?\s?/>.*$)'.format(title, label, label)
+                        match = re.match(pattern, line)
+                        if match:
+                            line = re.sub(r'([from|to]section\s?=\s?"?){}'.format(label), r'\1{}'.format(labels[label]), line, count=2)
+                            page_content[index] = line
+                            corrected_labels[label] = labels[label]
+                            edit = True
+                            del match
+
+            # Case 2: Mediawiki syntax
+            if line.startswith('{{#lst:') or line.startswith('{{#lstx'):
                 for label in labels.keys():
-                    label = '=' + label + '}}' #TODO: deal with cases when section isn't last parameter!
-                    newlabel = '=' + labels[label] + '}}'
                     if label in line:
-                        fixed_labels[label] = newlabel
-                        edit = True
-                        line = line.replace(label, new_label)
-                        page_content[index] = line
+                        pattern = r'({{#lstx?:)(\w+:)?({})(/\d*)?([|]{})(}})'.format(title, label)
+                        match = re.search(pattern, line)
+                        if match:
+                            line = re.sub(pattern, r'\1\2\3\4|{}\6'.format(labels[label]), line)
+                            page_content[index] = line
+                            corrected_labels[label] = labels[label]
+                            edit = True
+                            del match
+
+            # Case 3: template used for transclusion
+            if template[lang] and line.lower().startswith(template[lang][0]):
+                for label in labels.keys():
+                    if label in line:
+                        pattern = r'({}{})(/\d*)?(.*?)([|])(\w+)(\s?=\s?)({})(.*?}}$)'.format(template[lang][1], title, label)
+                        match = re.match(pattern, line)
+                        print(match.groups())
+                        if match and match.group(5) in template[lang][2:]:
+                            print('true')
+                            line = re.sub(pattern, r'\1\2\3\4\5\6{}\8'.format(labels[label]), line)
+                            page_content[index] = line
+                            corrected_labels[label] = labels[label]
+                            edit = True
+                            del match
+
     page_content = '\n'.join(page_content)
     if edit == True:
-        return page_content, fixed_labels
-    return '', '' # Return empty string if no edit in page necessary
+        return page_content, corrected_labels
+    return '', '' # Return two empty strings if no edit in page necessary
 
 def clean_title(title):
-    if '.djvu/' in title:
-        title = title.split('.djvu/')[0] + '.djvu'
+    # Remove namespace
     if ':' in title:
-        title = title.split(':')[1]
+        title = re.sub(r'^(\w+:)(\S.*)$', r'\2', title, count=1)
+    # Remove subpage number
+    if '.djvu/' in title or '.pdf/' in title:
+        title = re.sub(r'(^.*\.)(djvu|pdf)(/\d+$)', r'\1\2', title, count=1)
     return title
 
 def get_pagecontent(page_id, url):

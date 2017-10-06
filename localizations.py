@@ -13,17 +13,17 @@ section_label = {
     'ru': ''                        #no localization
     }
 
-# Localized template name and parmeter(s) for section name (depraced in some wikis)
-tr_template = {
-    'de': ['Seite', 'Abschnitt'],   # not used
-    'en': ['Page', 'section', 'section-x'],
-    'es': ['Inclusión', 'sección', 'section', 'section-x'],
-    'fr': ['Page', 'section', 'section-x'],
-    'hy': ['Էջ', 'բաժին', 'բաժին-x'],
-    'it': ['Pagina', 'section'],
+# Localized template syntax (depraced in some wikis)
+template = {
+    'de': ['{{seite|', '{{[Ss]eite[|]', 'Abschnitt'],   # not used
+    'en': ['{{page|', '{{[Pp]age[|]', 'section', 'section-x'],
+    'es': ['{{inclusión|', '{{[Ii]nclusión[|]', 'sección', 'section', 'section-x'],
+    'fr': ['{{page|', '{{[Pp]age[|]', 'section', 'section-x'],
+    'hy': ['{{էջ|', '{{[Էէ]ջ[|]', 'բաժին', 'բաժին-x'],
+    'it': ['{{pagina|', '{{[Pp]agina[|]', 'section'],
     'pl': [],                       # no template
-    'pt': ['Página', 'seção'],
-    'ru': ['Страница', 'section', 'section-x'] # Redirected 'Page' is also used
+    'pt': ['{{página|', '{{[Pp]ágina[|]', 'seção'],
+    'ru': ['{{страница|', '{{[Сс]траница[|]', 'section', 'section-x'] # Redirected 'Page' is also used
     }
 
 edit_summary = {
