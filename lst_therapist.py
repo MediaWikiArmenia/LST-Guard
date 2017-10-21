@@ -6,7 +6,7 @@ after each check (every 5 minutes).
 import json, requests, time, redis
 from getpass import getpass
 from configparser import ConfigParser
-from localizations import transclusion_template, edit_summary
+from localizations import template, edit_summary
 
 def run():
     r = redis.StrictRedis(host='localhost', port=7777, db=0)
