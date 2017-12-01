@@ -84,7 +84,7 @@ def check_saved_data(data):
                     if not page_content: # Means no labels were updated
                         print(' No corrections made. PASS')
                     else:
-                        summary = get_summary(corrected_labels, page['lang'])
+                        summary = compose_summary(corrected_labels, page['lang'])
                         edit = edit_page(page['url'], transclusion, page_content, summary)
                         if edit:
                             print(' 1 transclusion corrected! DONE')
@@ -92,7 +92,7 @@ def check_saved_data(data):
             # Update log
             with open('log.txt', 'a') as file:
                 log = time.ctime() + '\n\n' + page['url'].replace('w/api.php', 'wiki/{}'.format(page['title'])) \
-                    + '\n(' + get_summary(page['labels'], page['lang']).split('(')[1] + '\n' \
+                    + '\n(' + compose_summary(page['labels'], page['lang']).split('(')[1] + '\n' \
                     + str(len(transclusions)) + ' transclusions found' + '\n' + str(corrections) \
                     + ' corrections made' + '\n'
                 file.write(log)
@@ -332,7 +332,7 @@ def edit_page(url, page, page_content, summary):
         return True
     return False
 
-def get_summary(labels, lang):
+def compose_summary(labels, lang):
     """
     Generates summary in local language with the labels that were changed.
     """
