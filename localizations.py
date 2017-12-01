@@ -1,4 +1,5 @@
-#TODO: check is empty values will cause error
+# !/usr/local/bin/python3
+# -*- coding: utf-8 -*-
 
 # Syntax of section labeling
 section_label = {
