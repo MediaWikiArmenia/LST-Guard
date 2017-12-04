@@ -65,12 +65,16 @@ Template:
 
 ## Supported languages
 
-The current version supports 5 languages:
+The current version supports 9 languages:
 * English
 * German
 * Spanish
 * Armenian
 * Portuguese
+* French
+* Italian
+* Polish
+* Russian
 
 ## Install
 To use LST-Guard, you need Python3 or higher. You also need Redis-server. If you run a Linux machine, run this command to install Redis:
