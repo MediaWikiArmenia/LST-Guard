@@ -72,7 +72,8 @@ def check_saved_data(data):
         if not transclusions:
             print(' No transclusions of "{}": PASS'.format(page['title']))
         else:
-            print(' Checking {} transclusion(s) of "{}"...'.format(len(transclusions), page['title']))
+            print(' Checking {} transclusion(s) of "{}"...'.format
+                (len(transclusions), page['title']))
             for transclusion in transclusions:
                 # Get source code of transcluding page
                 page_content = get_pagecontent(page['url'], transclusion)
@@ -80,21 +81,30 @@ def check_saved_data(data):
                     print(' Error. Page not found. PASS')
                 else:
                 # Update lables in content if necessary
-                    page_content, corrected_labels = fix_transclusion(page_content, page['title'], page['labels'], page['lang'])
-                    if not page_content: # Means no labels were updated
-                        print(' No corrections made. PASS')
-                    else:
-                        summary = compose_summary(corrected_labels, page['lang'])
-                        edit = edit_page(page['url'], transclusion, page_content, summary)
-                        if edit:
+                    page_content, corrected_labels = (fix_transclusion
+                        (page_content, page['title'], page['labels'],
+                        page['lang']))
+                    if page_content: # Means labels were updated
+                        edit_sum, labels_sum = (compose_summary
+                            (corrected_labels, page['lang']))
+                        summary = '{} {}'.format(edit_sum, labels_sum)
+                        print('EDIT EDIT EDIT EDIT EDIT!!!!!!!!')
+                        """
+                        edit = edit_page(page['url'], transclusion,
+                            page_content, summary)
+                        if edit: # Means edit was succesful
                             print(' 1 transclusion corrected! DONE')
                             corrections += 1
+                            """
+                    else: # Means no edit necessary
+                        print(' No corrections made. PASS')
             # Update log
-            with open('log.txt', 'a') as file:
-                log = time.ctime() + '\n\n' + page['url'].replace('w/api.php', 'wiki/{}'.format(page['title'])) \
-                    + '\n(' + compose_summary(page['labels'], page['lang']).split('(')[1] + '\n' \
-                    + str(len(transclusions)) + ' transclusions found' + '\n' + str(corrections) \
-                    + ' corrections made' + '\n'
+            with open('log_.txt', 'a') as file:
+                edit, summary = compose_summary(page['labels'], page['lang'])
+                page_url = page['url'].replace('w/api.php', 'wiki/')
+                log = ('\n\n{}:\n\n{}{}\n{} transclusions found\n{} corrections'
+                    ' made\n{}'.format(time.ctime(), page_url, page['title'],
+                    str(len(transclusions)), str(corrections), summary))
                 file.write(log)
 
 
@@ -166,8 +176,8 @@ def get_transclusions(title, url):
 def fix_transclusion(page_content, title, labels, lang):
     """
     Checks if transclusion contains old label names and updates them.
-    Three transclusion styles are checked consecutively, although only the first
-    one is widely used in wiki projects.
+    Three transclusion styles are checked consecutively, although only the
+    first is widely used in wiki projects.
 
     Regex is used to make sure that labels are corrected only where necessary
     (the page can for example transclude more than one pages).
@@ -176,21 +186,28 @@ def fix_transclusion(page_content, title, labels, lang):
     values (string and dict).
     """
     page_content = page_content.splitlines()
+    title = clean_title(title) # Remove subpage and namespace from title
     corrected_labels = {}
     edit = False
-    title = clean_title(title)
+
     for line in page_content:
         if title in line:
-            index = page_content.index(line) #Remember index of each line
+            index = page_content.index(line) # Remember index of each line
 
             # Case 1: HTML syntax for transclusion
             if line.startswith('<pages index'):
                 for label in labels.keys():
                     if label in line:
-                        pattern = r'(<pages index\s?=\s?"?{}"?\s.*?fromsection\s?=\s?"?)({}|.*)("?\s?tosection\s?=\s?"?)({}|.*)("?\s?/>)'.format(re.escape(title), label, label)
+                        # Check if transclusion template uses old label
+                        pattern = (r'(<pages index\s?=\s?"?{}"?\s.*?fromsection'
+                            '\s?=\s?"?)({}|.*)("?\s?tosection\s?=\s?"?)({}|.*)'
+                            '("?\s?/>)'.format(re.escape(title), label, label))
                         match = re.search(pattern, line)
                         if match:
-                            line = re.sub(r'([from|to]section\s?=\s?"?){}'.format(label), r'\1{}'.format(labels[label]), line, count=2)
+                            # Replace old label(s) with new label
+                            line = (re.sub(r'([from|to]section\s?=\s?"?){}'
+                                .format(label), r'\1{}'.format(labels[label]),
+                                line, count=2))
                             page_content[index] = line
                             corrected_labels[label] = labels[label]
                             edit = True
@@ -200,10 +217,12 @@ def fix_transclusion(page_content, title, labels, lang):
             if line.startswith('{{#lst:') or line.startswith('{{#lstx'):
                 for label in labels.keys():
                     if label in line:
-                        pattern = r'({{#lstx?:)(\w+:)?({})(/\d*)?([|]{})(}})'.format(title, label)
+                        pattern = (r'({{#lstx?:)(\w+:)?({})(/\d*)?([|]{})(}})'
+                            .format(title, label))
                         match = re.search(pattern, line)
                         if match:
-                            line = re.sub(pattern, r'\1\2\3\4|{}\6'.format(labels[label]), line)
+                            line = re.sub(pattern, r'\1\2\3\4|{}\6'.format
+                                (labels[label]), line)
                             page_content[index] = line
                             corrected_labels[label] = labels[label]
                             edit = True
@@ -213,10 +232,12 @@ def fix_transclusion(page_content, title, labels, lang):
             if template[lang] and line.lower().startswith(template[lang][0]):
                 for label in labels.keys():
                     if label in line:
-                        pattern = r'({}{})(/\d*)?(.*?)([|])(\w+)(\s?=\s?)({})(.*?}}$)'.format(template[lang][1], title, label)
+                        pattern = (r'({}{})(/\d*)?(.*?)([|])(\w+)(\s?=\s?)({})'
+                            '(.*?}}$)'.format(template[lang][1], title, label))
                         match = re.match(pattern, line)
                         if match and match.group(5) in template[lang][2:]:
-                            line = re.sub(pattern, r'\1\2\3\4\5\6{}\8'.format(labels[label]), line)
+                            line = (re.sub(pattern, r'\1\2\3\4\5\6{}\8'.format
+                                (labels[label]), line))
                             page_content[index] = line
                             corrected_labels[label] = labels[label]
                             edit = True
@@ -238,6 +259,7 @@ def clean_title(title):
     if '.djvu/' in title or '.pdf/' in title: # Means there is subpage
         title = re.sub(r'(^.*\.)(djvu|pdf)(/\d+$)', r'\1\2', title, count=1)
     return title
+
 
 def get_pagecontent(url, page):
     """
@@ -275,6 +297,7 @@ def check_credentials():
     if not username or not password:
         username = input('Bot username: ')
         password = getpass('Password: ')
+
 
 def edit_page(url, page, page_content, summary):
     """
@@ -332,6 +355,7 @@ def edit_page(url, page, page_content, summary):
         return True
     return False
 
+
 def compose_summary(labels, lang):
     """
     Generates summary in local language with the labels that were changed.
@@ -339,7 +363,5 @@ def compose_summary(labels, lang):
     changes = []
     for old, new in zip(labels.keys(), labels.values()):
         changes.append(old + '→' + new)
-    return edit_summary[lang] + ' (' + ', '.join(changes) + ')'
-
-if __name__ == '__main__':
-    run()
+    labels_summary = '({})'.format(', '.join(changes))
+    return edit_summary[lang], labels_summary
