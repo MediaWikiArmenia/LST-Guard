@@ -11,7 +11,7 @@ config = ConfigParser()
 config.readfp(open(r'config.ini'))
 username = config.get('credentials', 'username')
 password = config.get('credentials', 'password')
-stop_button = True # No edits if this is True
+stop_button = True # Bot will not edit actual pages if this is True
 
 
 def run():
@@ -88,24 +88,22 @@ def check_saved_data(data):
                         edit_sum, labels_sum = (compose_summary
                             (corrected_labels, page['lang']))
                         summary = '{} {}'.format(edit_sum, labels_sum)
-                        print('EDIT EDIT EDIT EDIT EDIT!!!!!!!!')
-                        """
                         edit = edit_page(page['url'], transclusion,
                             page_content, summary)
                         if edit: # Means edit was succesful
                             print(' 1 transclusion corrected! DONE')
                             corrections += 1
-                            """
                     else: # Means no edit necessary
                         print(' No corrections made. PASS')
-            # Update log
-            with open('log_.txt', 'a') as file:
-                edit, summary = compose_summary(page['labels'], page['lang'])
-                page_url = page['url'].replace('w/api.php', 'wiki/')
-                log = ('\n\n{}:\n\n{}{}\n{} transclusions found\n{} corrections'
-                    ' made\n{}'.format(time.ctime(), page_url, page['title'],
-                    str(len(transclusions)), str(corrections), summary))
-                file.write(log)
+        # Update log
+        with open('log.txt', 'a') as file:
+            page_url = page['url'].replace('w/api.php', 'wiki/')
+            edit_sum,labels_sum = compose_summary(page['labels'], page['lang'])
+            log = ('\n\n{}:\n\n{}\n{}{}\n{}\n{} transclusion(s) found\n{}'
+                ' correction(s) made'.format(time.ctime(), page['title'],
+                page_url, page['title'], labels_sum[1:-1],
+                str(len(transclusions)), str(corrections)))
+            file.write(log)
 
 
 def set_status_on_wiki(url, status):
