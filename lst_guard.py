@@ -38,8 +38,8 @@ def run(proj='', langs=''):
 
     # Start watching recent changes
     print('Watching recent changes in {} ({})'.format(proj, ', '.join(langs)))
-    for event in EventSource
-        ('https://stream.wikimedia.org/v2/stream/recentchange'):
+    for (event in EventSource
+        ('https://stream.wikimedia.org/v2/stream/recentchange')):
         if event.event == 'message':
             try:
                 item = json.loads(event.data) # Create dict with edit details
@@ -135,7 +135,7 @@ def write_data(new_item):
             if len(old_item['labels']) == 0:
                 all_data.pop(all_data.index(old_item))
     # Finally merge the two lists
-    all_data.append(new_data)
+    all_data.append(new_item)
 
     # Write merged data into Redis
     r.set('lstdata', json.dumps(all_data))
