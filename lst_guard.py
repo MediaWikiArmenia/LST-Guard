@@ -38,7 +38,7 @@ def run(proj='', langs=''):
 
     # Start watching recent changes
     print('Watching recent changes in {} ({})'.format(proj, ', '.join(langs)))
-    for (event in EventSource
+    for event in (EventSource
         ('https://stream.wikimedia.org/v2/stream/recentchange')):
         if event.event == 'message':
             try:
@@ -64,7 +64,7 @@ def check_edit(item):
     Redis.
 
     Expected argument is a dict with (at leas) the following values:
-    revision - dict with revision IDS as {old:new}
+    revision - dict with revision IDS as {'old':int,'new':int}
     server_url - eg. https://es.wikipedia.org
     server_name - eg. es.wikipedia.org
     title - title of edited page
@@ -100,13 +100,13 @@ def write_data(new_item):
     # Wait if Redis is locked
     if r.get('locked'): # Check if 'locked' variable exists
         while int(r.get('locked')): # Check if value is '1' (i.e. "true")
-            time.sleep(0.02)
+            time.sleep(0.01)
     r.set('locked', 1)
 
     # If Redis is not empty, first load older data
     all_data = []
-    if not r.get('empty'):
-        r.set('empty', 1) # Check if 'empty' variable exists
+    if not r.get('empty'): # Make sure 'empty' variable exists
+        r.set('empty', 1)
     if int(r.get('empty')) == 0: # Means not empty
         # We get a list of saved edits each as a dict. See also check_edit().
         all_data = json.loads(r.get('lstdata').decode('utf-8'))
@@ -141,7 +141,7 @@ def write_data(new_item):
     r.set('lstdata', json.dumps(all_data))
     r.set('empty', 0)
     r.set('locked', 0)
-    print(' Saving to check transclusions later: DONE')
+    print(' Saved to check transclusions later: DONE')
 
 
 def check_revision(revids, url, lang):
@@ -218,3 +218,12 @@ def get_labels(wikitext, lang):
             if label:
                 labels.append(label.groups()[0])
     return labels
+
+if __name__ == '__main__':
+    data = {    'revision':     {'old':176233,'new':176234},
+                'server_url':   'https://hy.wikisource.org/',
+                'server_name':  'hy.wikisource.org/',
+                'title':        'Մասնակից:Vacio/Սևագրություն',
+                'lang': 'hy' }
+
+    check_edit(data)
