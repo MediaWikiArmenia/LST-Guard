@@ -105,6 +105,13 @@ $ python3 app.py wikisource en es de
 
 This will run LST-Guard on the English, Spanish and German Wikisources.
 
+Finally you can also run the software in the background and redirect its output to a file:
+
+```sh
+$ python3 -u app.py > stdout.txt &
+```
+The `-u` option here will prevent the `stdout` stream from being buffered.
+
 ### Config file
 
 The `config.ini` file contains the types of data. The fist, `[run on]` contains the project and the language(s) that LST-Guard will watch when run. If you run the program with command line arguments they will override the data in the config file.
