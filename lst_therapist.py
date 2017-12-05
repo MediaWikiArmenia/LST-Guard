@@ -362,4 +362,4 @@ def compose_summary(labels, lang):
     for old, new in zip(labels.keys(), labels.values()):
         changes.append(old + '→' + new)
     labels_summary = '({})'.format(', '.join(changes))
-        return edit_summary[lang], labels_summary
+    return edit_summary[lang], labels_summary
