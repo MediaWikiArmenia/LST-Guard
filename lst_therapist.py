@@ -31,7 +31,7 @@ def run():
         r = redis.StrictRedis(host='localhost', port=7777, db=0)
         check_credentials()
         while True:
-            if r.get('locked'): # Make sure 'locked' is set in Redis
+            if r.get('locked'): # Check if 'locked' is set in Redis
                 while int(r.get('locked')): # Wait if locked
                     time.sleep(0.01)
             if not r.get('empty'): # Make sure 'empty' is set in Redis
@@ -67,7 +67,6 @@ def check_saved_data(data):
     """
     for page in data:
         corrections = 0
-        set_status_on_wiki(page['url'], 'active')
         transclusions = get_transclusions(page['title'], page['url'])
         if not transclusions:
             print(' No transclusions of "{}": PASS'.format(page['title']))
@@ -85,6 +84,7 @@ def check_saved_data(data):
                         (page_content, page['title'], page['labels'],
                         page['lang']))
                     if page_content: # Means labels were updated
+                        set_status_on_wiki(page['url'], 'active')
                         edit_sum, labels_sum = (compose_summary
                             (corrected_labels, page['lang']))
                         summary = '{} {}'.format(edit_sum, labels_sum)
@@ -123,8 +123,11 @@ def set_status_on_wiki(url, status):
             if status_template in line:
                 already_set = True
         if not already_set:
-            summary = 'Setting bot status' # TODO: localize
-            edit_page(url, page, status_template, summary)
+            summary = 'Setting bot status to {}.'.format(status) #TODO:localize
+            edit = edit_page(url, page, status_template, summary)
+            if edit: # Means edit was succes
+                print(summary)
+
 
 
 def check_stopbutton(url, page):

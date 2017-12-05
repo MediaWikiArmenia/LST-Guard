@@ -218,12 +218,3 @@ def get_labels(wikitext, lang):
             if label:
                 labels.append(label.groups()[0])
     return labels
-
-if __name__ == '__main__':
-    data = {    'revision':     {'old':176233,'new':176234},
-                'server_url':   'https://hy.wikisource.org/',
-                'server_name':  'hy.wikisource.org/',
-                'title':        'Մասնակից:Vacio/Սևագրություն',
-                'lang': 'hy' }
-
-    check_edit(data)
