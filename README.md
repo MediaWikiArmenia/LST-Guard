@@ -121,7 +121,9 @@ The second section, `[supported on]`, contains the projects and languages that a
 Lastly, `[credentials]` is the place to add the login data of your Wikimedia bot account. Note, that these have to be obtained from [Special:BotPasswords](https://www.mediawiki.org/wiki/Manual:Bot_passwords).
 
 ### Log
-A simple `log.txt` is maintained with minimal data about detected changed labels and corrections. The log file of the testing version of the bot can be found here: [http://185.203.116.239/publ/lst_guard/log.txt](http://185.203.116.239/publ/lst_guard/log.txt).
+
+`[log.txt](http://185.203.116.239/publ/lst_guard/log.txt)` - minimal data about detected changed labels and corrections.
+`[stdout.txt](http://185.203.116.239/publ/lst_guard/stdout.txt)` - the terminal output of the last/current run.
 
 ## Further development
 Next stage is to expand `lst_guard` with some basic NLP to be sure that corresponding labels are correctly identified (as mentioned, current versions assumes that if the number of labels in old and new versions is the same, then they must be corresponding labels).
