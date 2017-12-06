@@ -98,6 +98,7 @@ def write_data(new_item):
     r = redis.StrictRedis(host='localhost', port=7777, db=0)
 
     # Wait if Redis is locked
+    # TODO: if accidentaly locked is 1, the program will get stuck here
     if r.get('locked'): # Check if 'locked' variable exists
         while int(r.get('locked')): # Check if value is '1' (i.e. "true")
             time.sleep(0.01)
