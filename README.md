@@ -122,8 +122,8 @@ Lastly, `[credentials]` is the place to add the login data of your Wikimedia bot
 
 ### Log
 
-`[log.txt](http://185.203.116.239/publ/lst_guard/log.txt)` - minimal data about detected changed labels and corrections.
-`[stdout.txt](http://185.203.116.239/publ/lst_guard/stdout.txt)` - the terminal output of the last/current run.
+[log.txt](http://185.203.116.239/publ/lst_guard/log.txt) is the main log and contains all detected changed labels and corrections.
+[stdout.txt](http://185.203.116.239/publ/lst_guard/stdout.txt) is where the terminal output of the last/current run is dumped and contains all pages that were checked by the bot.
 
 ## Further development
 Next stage is to expand `lst_guard` with some basic NLP to be sure that corresponding labels are correctly identified (as mentioned, current versions assumes that if the number of labels in old and new versions is the same, then they must be corresponding labels).
@@ -134,3 +134,4 @@ Secondly we want to add languages, especially languages that have many article t
 Help us with adding new languages. Test the code and find bugs.
 
 ## License
+We will define the license of LST-Guard soon. Meanwhile feel free to use, share, copy and modify it however you want as it is free software.
