@@ -1,33 +1,29 @@
 # !/usr/local/bin/python3
 # -*- coding: utf-8 -*-
 
-import json, requests, time, re, redis, atexit
+import json, requests, time, re, redis, atexit #DEBUG do we need atexit?
 from sseclient import SSEClient as EventSource
 from configparser import ConfigParser
 from localizations import section_label
 
-# Load global variables from config file
+# Declare global variables
 global supported_projects, supported_languages, run_on_project, run_on_languages
-config = ConfigParser()
-config.readfp(open(r'config.ini'))
-supported_projects = config.get('supported', 'projects').split()
-supported_languages = config.get('supported', 'languages').split()
-run_on_project = config.get('run on', 'project')
-run_on_languages = config.get('run on', 'languages').split()
 
-
-def run(proj='', langs=''):
+def run(proj=None, langs=None, dbg_mode=False):
     """
-    Main Routine. Reads the recent changes stream EventSource (includes edits
-    from all wikimedia projects), filters out edits in the specified project
-    and langauge(s) and finally calls "check_edit()" to see if section labels
-    were changed during edit. If so, "check_edit()" will store the edit details
-    in Redis for lst_therapist to correct these labels in transclusions if
-    necessary.
+    Main routine. Reads the recent changes stream from EventSource (includes
+    edits from all wikimedia projects), filters out edits in the specified
+    project and langauge(s) and sends to the function check_edit() to check
+    for modified section labels.
 
-    The arguments proj and langs are respectively string and list. If empty,
-    the global variables loaded from the config file will be used instead.
+    Optional arguments:
+    - proj (string)             - the Wikimedia project to watch on
+    - langs (list of strings)   - the language versions of project
+
+    If no arguments are provided, they are loaded from config.ini
     """
+    # Load global variables from config
+    load_config()
     # Identify project which will be watched
     if not proj:
         proj = run_on_project
@@ -38,37 +34,47 @@ def run(proj='', langs=''):
 
     # Start watching recent changes
     print('Watching recent changes in {} ({})'.format(proj, ', '.join(langs)))
-    for event in (EventSource
-        ('https://stream.wikimedia.org/v2/stream/recentchange')):
+    stream_url = 'https://stream.wikimedia.org/v2/stream/recentchange'
+    for event in EventSource(stream_url):
         if event.event == 'message':
             try:
                 item = json.loads(event.data) # Create dict with edit details
             except ValueError:
-                pass
+                print('Unable to parse event data. Skipping')
             else:
                 # split server url to get language and project
                 server = item['server_name'].split('.')
                 # Filter out edits in specified project and language(s)
                 # TODO add namespace filter
-                if (server[0] in langs and server[1] == proj and
-                    item['type'] == 'edit'):
+                if (server[0] in langs and server[1] == proj and item['type'] \
+                    == 'edit' and item['namespace'] == 104):
                     print('New revision in page "{}" ({}).\n Checking...'
                         .format(item['title'], server[0]))
                     check_edit(item)
 
 
+def load_config():
+    global supported_projects, supported_languages, run_on_project, run_on_languages
+    config = ConfigParser()
+    config.readfp(open(r'config.ini'))
+    supported_projects = config.get('supported', 'projects').split()
+    supported_languages = config.get('supported', 'languages').split()
+    run_on_project = config.get('run on', 'project')
+    run_on_languages = config.get('run on', 'languages').split()
+
 def check_edit(item):
     """
-    Passes data over to "check_revision()" (which does the actual checking).
-    If changed labels are detected calls "write_data()" to save edit data in
-    Redis.
+    Parses the required parameters and psses data over to check_revision() which
+    does the actual checking. If changed labels are detected calls write_data()
+    to save edit data in Redis.
 
-    Expected argument is a dict with (at leas) the following values:
-    revision - dict with revision IDS as {'old':int,'new':int}
-    server_url - eg. https://es.wikipedia.org
-    server_name - eg. es.wikipedia.org
-    title - title of edited page
-    lang - language of project (eg. 'en')
+    Argument:
+    item (dict) - should contain the following:
+        revision - dict with revision IDS as {'old':int,'new':int}
+        server_url - eg. https://es.wikipedia.org
+        server_name - eg. es.wikipedia.org
+        title - title of edited page
+        lang - language of project (eg. 'en')
     """
     revids = item['revision']
     url = item['server_url'] + '/w/api.php'
@@ -77,17 +83,104 @@ def check_edit(item):
     # See if there are changed labels in revision (returns a dict)
     changed_labels = check_revision(revids, url, lang)
 
-    # Empty dict means no lables were changed
-    if len(changed_labels) == 0:
-        print(' No changed labels: PASS')
-    # Pass data over to next function to write it in Redis
-    else:
+    # If there are any changed labels, write data to Redis
+    if changed_labels:
         print(' {} changed label(s) detected...'.format(len(changed_labels)))
         data = {    'title': item['title'],
                     'lang': lang,
                     'url': url,
                     'labels': changed_labels }
         write_data(data)
+    else:
+        print(' No changed labels: PASS')
+
+
+def check_revision(revids, url, lang):
+    """
+    Compares the old and new versions of the page. Then compares the number of
+    section labels in both, if equal, assumes those labels correspond to each
+    other.
+
+    Arguments:
+        revids  - Dict with revision ids (two items: 'old' and 'new', both int)
+        url     - API reference point
+        lang    - Language of the project
+
+    Returns:
+        Dict with modified labels: old label as key, new label as value. (Dict
+        is empty if are no modified labels were found.)
+    """
+    old_text, new_text = get_diff(revids, url)
+    old_labels = get_labels(old_text, lang)
+    new_labels = get_labels(new_text, lang)
+
+    changed_labels = {}
+
+    if len(old_labels) == len(new_labels): # Compare number of lables
+        for old, new in zip(old_labels, new_labels):
+            if old != new:
+                changed_labels[old] = new
+    return changed_labels
+
+
+def get_diff(revids, url):
+    """
+    Gets the page content before and after the revision (in wikisyntax).
+
+    Arguments:
+        revids  - Dict with revision ids (two items: 'old' and 'new', both int)
+        url     - API reference point
+
+    Returns: Tuple of two strings
+
+    """
+    resp = (requests.get(url, params = {
+                        'action': 'query',
+                        'prop': 'revisions',
+                        'rvprop': 'content',
+                        'format': 'json',
+                        'utf8': '',
+                        'revids': str(revids['old']) + '|' + str(revids['new'])
+                        }))
+    if resp.status_code != 200: # Means something went wrong.
+        raise ApiError('GET /tasks/ {}'.format(resp.status_code))
+
+    # Decode to make sure non-latin characters are displayed correctly
+    js = json.loads(resp.content.decode('utf-8'))
+    assert ('badrevids' not in js['query'].keys()), 'Incorrect revision IDs'
+
+    # Find page id(s) in json, shouldn't be more than 1
+    pageid = list(js['query']['pages'].keys())
+    assert (len(pageid) == 1), 'Revision IDs from different pages'
+    pageid = pageid[0]
+    diffs = js['query']['pages'][pageid]['revisions']
+
+    return diffs[0]['*'], diffs[1]['*']
+
+
+def get_labels(wikitext, lang):
+    """
+    Retrieve section labels from a wiki-page. The label syntax is obtained
+    from the localizations file. Checks for both, localized and English syntax.
+    """
+    labels = []
+    en_label = section_label['en']  # English syntax
+    loc_label = section_label[lang] # Localized syntax
+
+    for line in wikitext.splitlines():
+        # Check localized syntax of labels
+        if loc_label and loc_label in line:
+            # Some regex to deal with irregularietes (brackets, whitespace)
+            label = re.search(r'<{}\s?=\s?"?(.*?)"?\s?/>'.format(loc_label), line)
+            if label:
+                labels.append(label.groups()[0])
+        # Check English syntax of labels (since most wikis use English syntax)
+        elif en_label in line: # TODO was initialy if, doublecheck
+            label = re.search(r'<{}\s?=\s?"?(.*?)"?\s?/>'.format(en_label), line)
+            if label:
+                labels.append(label.groups()[0])
+    return labels
+
 
 def write_data(new_item):
     """
@@ -143,79 +236,3 @@ def write_data(new_item):
     r.set('empty', 0)
     r.set('locked', 0)
     print(' Saved to check transclusions later: DONE')
-
-
-def check_revision(revids, url, lang):
-    """
-    A dumb function to find changed labels in an edited page.
-    Compares the old and new versions of the page. Then compares the number of
-    section labels in both, if equal, assumes those are labels of corresponding
-    sections. Returns those labels that don't match.
-
-    Returns empty dict if changed labels are not detected.
-    """
-    old_text, new_text = get_diff(revids, url)
-    old_labels = get_labels(old_text, lang)
-    new_labels = get_labels(new_text, lang)
-    changed_labels = {}
-
-    if len(old_labels) == len(new_labels): # Compare number of lables
-        for old, new in zip(old_labels, new_labels):
-            if old != new:
-                changed_labels[old] = new
-    return changed_labels
-
-
-def get_diff(revids, url):
-    """
-    Gets the new and old versions of an edited page (in wikisyntax).
-    The argument revids is a dict with two int values:
-    old - ID of the old version of the page
-    new - ID of the new version
-    """
-    resp = (requests.get(url, params = {
-                        'action': 'query',
-                        'prop': 'revisions',
-                        'rvprop': 'content',
-                        'format': 'json',
-                        'utf8': '',
-                        'revids': str(revids['old']) + '|' + str(revids['new'])
-                        }))
-    if resp.status_code != 200: # Means something went wrong.
-        raise ApiError('GET /tasks/ {}'.format(resp.status_code))
-
-    # Decode to make sure non-latin characters are displayed correctly
-    js = json.loads(resp.content.decode('utf-8'))
-    assert ('badrevids' not in js['query'].keys()), 'Incorrect revision IDs'
-
-    # Find page id(s) in json, shouldn't be more than 1
-    pageid = list(js['query']['pages'].keys())
-    assert (len(pageid) == 1), 'Revision IDs from different pages'
-    pageid = pageid[0]
-    diffs = js['query']['pages'][pageid]['revisions']
-
-    return diffs[0]['*'], diffs[1]['*']
-
-
-def get_labels(wikitext, lang):
-    """
-    Retrieve section labels from a wiki-page. The label syntax is obtained
-    from the localizations file.
-    """
-    labels = []
-    en_label = section_label['en']  # English syntax
-    loc_label = section_label[lang] # Localized syntax
-
-    for line in wikitext.splitlines():
-        # Check localized syntax of labels
-        if loc_label and loc_label in line:
-            # Some regex to deal with irregularietes (brackets, whitespace)
-            label = re.search(r'<{}\s?=\s?"?(.*?)"?\s?/>'.format(loc_label), line)
-            if label:
-                labels.append(label.groups()[0])
-        # Check English syntax of labels (since most wikis use English syntax)
-        if en_label in line:
-            label = re.search(r'<{}\s?=\s?"?(.*?)"?\s?/>'.format(en_label), line)
-            if label:
-                labels.append(label.groups()[0])
-    return labels
