@@ -6,14 +6,8 @@ from multiprocessing import Process
 logging.basicConfig(filename='logs_lst.txt',
                     level=logging.INFO,
                     format='%(asctime)s:%(levelname)s:%(message)s')
-global lang, proj
-
-def run():
-    set_args()
-    guard = Process(target=start_guard)
-    guard.start()
-    therapist = Process(target=start_therapist)
-    therapist.start()
+global lang, proj, DEBUG_MODE
+DEBUG_MODE = True
 
 def set_args():
     assert len(argv) <= 11, 'Too many arguments given' # max 11 args, i.e. max 9 languages
@@ -28,6 +22,13 @@ def start_guard():
 
 def start_therapist():
     lst_therapist.run()
+
+def run():
+    set_args()
+    guard = Process(target=start_guard)
+    guard.start()
+    therapist = Process(target=start_therapist)
+    therapist.start()
 
 if __name__ == '__main__':
     run()

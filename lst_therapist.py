@@ -13,8 +13,10 @@ username = config.get('credentials', 'username')
 password = config.get('credentials', 'password')
 stop_button = True # Bot will not edit actual pages if this is True
 
+global DEBUG_MODE, DEBUG_LOG
+DEBUG_LOG = 'debug_mode_edits.html'
 
-def run():
+def run(debug_mode=False):
     """
     Main Routine.
     Wakes up every 5 minutes to read new data from Redis. If there is new data,
@@ -27,6 +29,8 @@ def run():
 
     empty and locked are strings, since Redis has no boolean types.
     """
+    global DEBUG_MODE
+    DEBUG_MODE = debug_mode
     try:
         r = redis.StrictRedis(host='localhost', port=7777, db=0)
         check_credentials()
@@ -49,7 +53,7 @@ def run():
                 time.sleep(300)
     except(KeyboardInterrupt, SystemExit):
         #TODO exit gracefully
-        raise
+        pass
 
 
 def check_saved_data(data):
@@ -88,11 +92,14 @@ def check_saved_data(data):
                         edit_sum, labels_sum = (compose_summary
                             (corrected_labels, page['lang']))
                         summary = '{} {}'.format(edit_sum, labels_sum)
-                        edit = edit_page(page['url'], transclusion,
-                            page_content, summary)
-                        if edit: # Means edit was succesful
-                            print(' 1 transclusion corrected! DONE')
-                            corrections += 1
+                        if DEBUG_MODE:
+                            edit_debug_mode(transclusion, labels_sum, page, lang, url)
+                        else:
+                            edit = edit_page(page['url'], transclusion,
+                                page_content, summary)
+                            if edit: # Means edit was succesful
+                                print(' 1 transclusion corrected! DONE')
+                                corrections += 1
                     else: # Means no edit necessary
                         print(' No corrections made. PASS')
         # Update log
@@ -106,6 +113,40 @@ def check_saved_data(data):
             file.write(log)
 
 
+def edit_debug_mode(transclusion, labels_sum, page, lang, url):
+    parameters = {  'action': 'query',
+                    'prop': 'info',
+                    'inprop': 'url',
+                    'pageids': transclusion,
+                    'format': 'json',
+                    'utf8': '' }
+    try:
+        resp = (requests.get(url, params = parameters))
+    except:
+        print('Unable to get page info for debug mode edit')
+        return None
+    else:
+        if resp.status_code != 200:
+            #raise ApiError('GET /tasks/ {}'.format(resp.status_code))
+            print('ApiError')
+            return None
+        else:
+            # Get info about transcluding page
+            pid = [p for p in resp.json()['query']['pages'].keys()][0]
+            tr = resp.json()['query']['pages'][pid]
+
+            # Define data to write in file
+            write_data = []
+            write_data.append('\n\n<br/><br/>{}\n'.format(time.ctime()))
+            write_data.append('<b>{}</b>\n'.format(url.split('/')[2]))
+            write_data.append('Page to edit: <a href="{}">{}</a>\n'.format(tr['fullurl'],tr['title']))
+            write_data.append('Transcluded page: <a href="{}">{}</a>\n'.format(page['url'],page['title']))
+            write_data.append(labels_sum)
+            with open(DEBUG_LOG, 'a') as f:
+                f.write('<br/>'.join(write_data))
+            return True
+
+
 def set_status_on_wiki(url, status):
     """
     Updates bot status on bot subpage (in edited wiki project).
@@ -115,7 +156,7 @@ def set_status_on_wiki(url, status):
     user = username.split('@')[0]
     page = 'User:' + user + '/status'
     button_exists = check_stopbutton(url, page)
-    if button_exists and not stop_button:
+    if button_exists and not stop_button and not DEBUG_MODE:
         content = get_pagecontent(url, page)
         status_template = '{{User:' + user + '/status/' + status + '}}'
         already_set = False
@@ -127,7 +168,6 @@ def set_status_on_wiki(url, status):
             edit = edit_page(url, page, status_template, summary)
             if edit: # Means edit was succes
                 print(summary)
-
 
 
 def check_stopbutton(url, page):
@@ -287,6 +327,7 @@ def get_pagecontent(url, page):
         return None
     content = resp.json()['query']['pages'][pid]['revisions'][0]['*']
     return content
+
 
 def check_credentials():
     """
