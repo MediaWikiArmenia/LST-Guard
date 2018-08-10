@@ -1,4 +1,4 @@
-import lst_guard, lst_therapist
+import lst_poller, lst_therapist
 import logging
 from sys import argv
 from multiprocessing import Process
@@ -17,18 +17,16 @@ def set_args():
     else:
         proj = proj, lang = '', []
 
-def start_guard():
-    lst_guard.run(proj, lang)
+def start_poller():
+    lst_poller.run(proj, lang)
 
 def start_therapist():
     lst_therapist.run()
 
 def run():
     set_args()
-    guard = Process(target=start_guard)
-    guard.start()
-    therapist = Process(target=start_therapist)
-    therapist.start()
+    Process(target=start_poller).start()
+    Process(target=start_therapist).start()
 
 if __name__ == '__main__':
     run()
