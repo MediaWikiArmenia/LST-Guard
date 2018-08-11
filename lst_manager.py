@@ -1,12 +1,15 @@
 # !/usr/local/bin/python3
 
-# TODO check if importing module also imports imported libs
-
 import redis, subprocess
 from sys import argv
 from configparser import ConfigParser
 from time import sleep
 
+"""
+Manage LST-Guard processes: start, stop, restart or get status.
+Also checks if the Redis database is accessible. And verifies
+the Config file before (re)starting LST-Guard.
+"""
 
 global redb, proc_arg, config_fp
 proc_arg = ['nohup', 'python3', 'app.py', '&']
