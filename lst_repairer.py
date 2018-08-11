@@ -8,7 +8,7 @@ from localizations import template, edit_summary
 
 global stop_button, username, password
 config = ConfigParser()
-config.readfp(open(r'config.ini'))
+config.read_file(open(r'config.ini'))
 username = config.get('credentials', 'username')
 password = config.get('credentials', 'password')
 stop_button = True # Bot will not edit actual pages if this is True

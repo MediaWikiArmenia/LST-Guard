@@ -1,4 +1,4 @@
-import lst_poller, lst_therapist
+import lst_poller, lst_repairer
 import logging
 from sys import argv
 from multiprocessing import Process
@@ -20,13 +20,13 @@ def set_args():
 def start_poller():
     lst_poller.run(proj, lang)
 
-def start_therapist():
-    lst_therapist.run()
+def start_repairer():
+    lst_repairer.run()
 
 def run():
     set_args()
     Process(target=start_poller).start()
-    Process(target=start_therapist).start()
+    Process(target=start_repairer).start()
 
 if __name__ == '__main__':
     run()
