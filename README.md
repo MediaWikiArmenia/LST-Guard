@@ -3,18 +3,20 @@
 
 LST-Guard watches recent changes in Wikimedia projects and catches edits that may cause broken links in ([transclusion](https://en.wikipedia.org/wiki/Transclusion)) pages. This is done by one process (`lst_poller`) catching and saving all changed section labels and the second process (`lst_repairer`) checking if those result in broken transclusions and if so, updating the section labels in pages where they are transcluded.
 
-We provide `lst_manager` to manage these background processes.
-
 ## Table of Contents
 
 - [Files](#files)
-- [Background](#background)
+- [Architecture](#architecture)
   - [Behavior](#behavior)
-- [Supported projects and languages](#supported-projects-and-languages)
-- [Install](#install)
+  - [Example](#example)
+- [Supported languages](#supported-languages)
 - [Usage](#usage)
+- [Install requirements](#install-requirements)
+	- [Starting](#starting)
+	- [Managing & monitoring](#managing-&-monitoring)
+	- [Run in debug-mode](#run-in-debug-mode)
 	- [Config file](#config-file)
-  - [Log](#log)
+  - [Logging](#logging)
 - [Further development](#further-development)
 - [Contribute](#contribute)
 - [License](#license)
