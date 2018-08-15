@@ -1,22 +1,22 @@
-# !/usr/local/bin/python3
-
-import redis, subprocess
+#!/usr/bin/env python3
+import redis
+import subprocess
 from sys import argv
 from configparser import ConfigParser
 from time import sleep
 
 """
-Manage LST-Guard processes: start, stop, restart or get status.
-Also checks if the Redis database is accessible. And verifies
-the Config file before (re)starting LST-Guard.
+Manage and daemonize LST-Guard: start, stop, restart or get status.
+
+Checks if the Redis database is accessible. Verifies if the config file is valid
+before (re)starting LST-Guard.
+
+Author: Vachagan Gratian, 2017-2018, MediaWiki Armenia.
 """
 
-global redb, redb_host, redb_port, redb_id, proc_arg, config_fp
-redb_host = 'localhost'
-redb_port = 7777
-redb_id = 0
-proc_arg = ['nohup', 'python3', 'app.py', '&']
-config_fp = r'config.ini'
+global redb, redb_host, redb_port, redb_id, proc_args, config_fp
+proc_args = ['nohup', 'python3', 'app.py', '&']
+config_fp = 'config.ini'
 
 
 def run():
@@ -29,7 +29,7 @@ def run():
                     '-redis':check_redis,
                     '-help':print_usage
                     }
-    if not len(argv)>1 or argv[1] not in run_option.keys():
+    if len(argv)<2 or len(argv)>3 or argv[1] not in run_option.keys():
         print_usage()
         exit()
     # Option is ok, continue
@@ -41,7 +41,8 @@ def run():
 
 
 def open_redis():
-    global redb
+    global redb, redb_host, redb_port, redb_id
+    redb_host, redb_port, redb_id = check_config()
     try:
         redb = redis.StrictRedis(host=redb_host, port=redb_port, db=redb_id)
     except:
@@ -90,10 +91,9 @@ def check_redis(data=None):
 
 
 def start_lstg():
-    check_config()
     print('Flushing Redis database.')
     redb.flushdb()
-    subprocess.Popen(proc_arg, stdin=subprocess.PIPE, stdout=subprocess.PIPE, \
+    subprocess.Popen(proc_args, stdin=subprocess.PIPE, stdout=subprocess.PIPE, \
         stderr=subprocess.PIPE )
     lock_redis()
     redb.set('poller_status', 'starting')
@@ -134,10 +134,14 @@ def get_status():
 
 
 def check_config():
+    """
+    Validate config.ini and return Redis db details that we need.
+    """
     missing_fields = {}
-    required_fields = { 'run on':       ['project', 'languages'],
-                        'supported':    ['projects', 'languages'],
-                        'credentials':  ['username', 'password']
+    required_fields = { 'run on':           ['project', 'languages'],
+                        'supported':        ['projects', 'languages'],
+                        'credentials':      ['username', 'password'],
+                        'redis database':   ['host', 'port', 'db']
                         }
     config = ConfigParser()
     try:
@@ -147,11 +151,15 @@ def check_config():
         exit()
     else:
         for section in required_fields.keys():
-            if section not in config.sections():
+            if not config.has_section(section):
                 missing_fields[section] = None
             else:
                 for option in required_fields[section]:
-                    if option not in config.options(section) or not config.get(section, option):
+                    # Check both that the option label and argument are present
+                    # Eg. "password = " without the actual password itself will
+                    # be noted as missing option
+                    if not config.has_option(section, option) or not \
+                        config.get(section, option, fallback=False):
                         missing_fields[section] = missing_fields.get(section,[]) + [option]
         if missing_fields:
             print('Error: missing or empty fields in [config.ini]:')
@@ -164,6 +172,9 @@ def check_config():
             exit()
         else:
             print('Check: config file [{}]: Success.'.format(config_fp))
+            return (config.get('redis database', 'host'), \
+                    config.get('redis database', 'port'), \
+                    config.get('redis database', 'db'))
 
 
 def print_usage():

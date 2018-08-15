@@ -116,16 +116,16 @@ Before starting LST-Guard, a redis-server should be running. This can be done wi
 $ redis-server --port 7777 &
 ```
 
-LST-Guard using `lst_manager`:
+Start LST-Guard using `lst_manager`:
 
 ```sh
-$ python3 lst_manager.py -start
+$ ./lst_manager.py -start
 ```
 
 If everything is okay, your terminal should print this:
 
 ```sh
-$ python lst_manager.py -start
+$ ./lst_manager.py -start
 Check: Redis DB running OK (host: localhost, port: 7777, db: 0)
 Check: config file [config.ini]: Success.
 Flushing Redis database.
