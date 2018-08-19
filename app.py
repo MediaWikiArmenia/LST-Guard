@@ -14,7 +14,7 @@ Expected arguments:
     Optional:
         - debug_mode_fp
 """
-global langs, proj, config_fp, dbg_fp, m_name
+global langs, proj, config_fp, dbg_fp, m_name, rdb_host, rdb_port, rdb_id
 config_fp = dbg_fp = None # initialize to avoid NameError
 m_name = 'APP' # module name for logger
 
@@ -64,13 +64,13 @@ def set_args():
 def start_poller():
     logging.info('[{}] Starting poller on [{}] ({})'.format(m_name, proj, \
         ', '.join(langs)))
-    lst_poller.run(proj, lang)
+    lst_poller.run(proj, langs, rdb_host, rdb_port, rdb_id)
 
 
 def start_repairer():
     logging.info('[{}] Starting repairer in {} mode'.format \
         (m_name, 'DEBUG' if dbg_fp else 'normal'))
-    lst_repairer.run(dbg_fp)
+    lst_repairer.run(dbg_fp, rdb_host, rdb_port, rdb_id)
 
 
 def load_config():
@@ -84,7 +84,7 @@ def load_config():
 
     Will terminate if options are invalid.
     """
-    global langs, proj
+    global langs, proj, rdb_host, rdb_port, rdb_id
     try:
         config = ConfigParser()
         config.read_file(open(config_fp))
@@ -93,30 +93,40 @@ def load_config():
             (m_name, config_fp))
         sys.exit(1)
     else:
-        langs = config.get('run on', 'languages').split()
-        proj = config.get('run on', 'project')
-        supported_langs = config.get('supported', 'languages').split()
-        supported_projs = config.get('supported', 'projects')
+        # Try to load necessary data
+        try:
+            rdb_host = config.get('redis database', 'host')
+            rdb_port = config.get('redis database', 'port')
+            rdb_id = config.get('redis database', 'db')
+            langs = config.get('run on', 'languages').split()
+            proj = config.get('run on', 'project')
+            supported_langs = config.get('supported', 'languages').split()
+            supported_projs = config.get('supported', 'projects')
+        except:
+            logging.warning('[{}] Unable to load required data from config' \
+                ' [{}]. Terminating'.format(m_name, config_fp))
+            sys.exit(1)
+        else:
         # Check if all selected languages are supported
-        not_supported = []
-        for lang in langs:
-            if lang not in supported_langs:
-                not_supported.append(lang)
-        # Both languages and project not supported
-        if not_supported and proj not in supported_projs:
-            logging.warning('[{}] Not supported language(s) {} and project' \
-                ' [{}]. Terminating'.format(m_name, not_supported, proj))
-            sys.exit(1)
-        # Only languages not supported
-        elif not_supported:
-            logging.warning('[{}] Not supported language(s) {}. Terminating' \
-            ''.format(m_name, not_supported))
-            sys.exit(1)
-        # Project not supported
-        elif proj not in supported_projs:
-            logging.warning('[{}] Not supported project [{}]. Terminating' \
-            ''.format(m_name, proj))
-            sys.exit(1)
+            not_supported = []
+            for lang in langs:
+                if lang not in supported_langs:
+                    not_supported.append(lang)
+            # Both project and languages not supported
+            if not_supported and proj not in supported_projs:
+                logging.warning('[{}] Not supported language(s) {} and project' \
+                    ' [{}]. Terminating'.format(m_name, not_supported, proj))
+                sys.exit(1)
+            # Languages not supported
+            elif not_supported:
+                logging.warning('[{}] Not supported language(s) {}. Terminating' \
+                    .format(m_name, not_supported))
+                sys.exit(1)
+            # Project not supported
+            elif proj not in supported_projs:
+                logging.warning('[{}] Not supported project [{}]. Terminating' \
+                    .format(m_name, proj))
+                sys.exit(1)
 
 
 if __name__ == '__main__':
