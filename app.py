@@ -64,15 +64,13 @@ def set_args():
 def start_poller():
     logging.info('[{}] Starting poller on [{}] ({})'.format(m_name, proj, \
         ', '.join(langs)))
-    print('running poller on [{}] ({})'.format(proj, ', '.join(langs)))
-    #lst_poller.run(proj, lang)
+    lst_poller.run(proj, lang)
 
 
 def start_repairer():
     logging.info('[{}] Starting repairer in {} mode'.format \
         (m_name, 'DEBUG' if dbg_fp else 'normal'))
-    print('running repairer in debug mode' if dbg_fp else 'running repairer normally')
-    #lst_repairer.run(dbg_fp)
+    lst_repairer.run(dbg_fp)
 
 
 def load_config():
