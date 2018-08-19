@@ -1,43 +1,85 @@
 #!/usr/bin/env python3
+
 import redis
 import subprocess
-from sys import argv
-from configparser import ConfigParser
+import sys
 from time import sleep
+from configparser import ConfigParser
 
-"""
-Manage and daemonize LST-Guard: start, stop, restart or get status.
-
-Checks if the Redis database is accessible. Verifies if the config file is valid
-before (re)starting LST-Guard.
-
-Author: Vachagan Gratian, 2017-2018, MediaWiki Armenia.
-"""
-
-global redb, redb_host, redb_port, redb_id, proc_args, config_fp
-proc_args = ['nohup', 'python3', 'app.py', '&']
+global redb, redb_host, redb_port, redb_id, proc_args, config_fp, debug_mode_fp
 config_fp = 'config.ini'
+debug_mode_fp = 'debug_edits.html'
+debug_mode = False
+proc_args = ['nohup', 'python3', 'dumb.py', config_fp, '&']
+
+
+__doc__ = """
+LST-Guard manager: start, restart, stop or status the service.
+
+Calls app.py to start the service (lst_poller and lst_repairer) and uses
+Redis to send stop signals, get status or check data.
+
+REQUIREMENTS:
+    To start the service, a Redis-server must be running and a valid config
+    file available.
+
+ARGUMENTS:
+    Required (one of):
+        -status            Show status of service (see details below)
+        -start             Start service
+        -stop              Stop service, processes will finilize and stop
+        -restart           Restart service, processes will finilize and restart
+        -redis             Show is Redis-server is running and available data
+        -help              Print this message
+
+    Optional:
+        -start -d          Start in dubug mode, no edits will be made,
+                           instead edits will be stored in "{}"
+        -restart -d        Same as above
+        -redis variable    Print content of "variable"
+
+STATUS:
+        'Not started'      Service has not been started
+        'Starting'         Signal sent to app.py to start service
+        'Running'          Process is running
+        'Stopping'         Stop signal send to processes
+        'Stopped'          Processes finilized and exited successfully
+
+EXAMPLES:
+    Start Lst-guard:
+    ./lst_manager -start
+""".format(debug_mode_fp)
 
 
 def run():
+    global debug_mode
     # Check command line option
     # Print usage and exit if not valid
     run_option = {  '-start':start_lstg,
                     '-stop':stop_lstg,
                     '-restart':restart_lstg,
                     '-status':get_status,
-                    '-redis':check_redis,
-                    '-help':print_usage
+                    '-redis':check_redis
                     }
-    if len(argv)<2 or len(argv)>3 or argv[1] not in run_option.keys():
-        print_usage()
-        exit()
-    # Option is ok, continue
+    if len(sys.argv)<2 or len(sys.argv)>3 or sys.argv[1]=='-help':
+        print(__doc__)
+        sys.exit(2)
+    elif sys.argv[1] not in run_option.keys():
+        print('Unrecognized option "{}". Use "-help" for help'.format(sys.argv[1]))
+        sys.exit(2)
+    elif sys.argv[1] in ('-start','-restart') and len(sys.argv)==3 and sys.argv[2] != '-d':
+        print('Unrecognized argument "{}". Use "-help" for help'.format(sys.argv[2]))
+        sys.exit(2)
+    elif sys.argv[1] in ('-stop','-status','-help') and len(sys.argv)==3:
+        print('Unrecognized argument "{}". Use "-help" for help'.format(sys.argv[2]))
+        sys.exit(2)
+    # Option/arguments are ok, continue
+    print('\n## LST-Guard Manager ##\n')
     open_redis()
-    if len(argv)>2:
-        run_option[argv[1]](argv[2])
+    if len(sys.argv)==2:
+        run_option[sys.argv[1]]()
     else:
-        run_option[argv[1]]()
+        run_option[sys.argv[1]](sys.argv[2])
 
 
 def open_redis():
@@ -45,10 +87,12 @@ def open_redis():
     redb_host, redb_port, redb_id = check_config()
     try:
         redb = redis.StrictRedis(host=redb_host, port=redb_port, db=redb_id)
+        redb.client_list()
     except:
         print('Error: Unable to open Redis DB (host: {}, port: {}, db: {}).' \
-            'Exiting'.format(redb_host, redb_port, redb_id))
-        exit()
+            .format(redb_host, redb_port, redb_id))
+        print('Is redis-server running or wrong parameters?')
+        sys.exit(1)
     else:
         print('Check: Redis DB running OK (host: {}, port: {}, db: {})'.format \
             (redb_host, redb_port, redb_id))
@@ -63,16 +107,15 @@ def lock_redis(unlock=False):
             redb.set('locked', 0 if unlock else 1)
         elif int(redb.get('locked')):
             print('Waiting for Redb to unlock...', end=' ', flush=True)
-            waited = 0.0
+            waited = 0
             while (int(redb.get('locked'))):
                 sleep(0.01)
-                waited += 0.01
-                if waited > 10:
+                waited += 1
+                if waited > 1000: # we waited 10s
                     print('\nError: Unable to lock Redb, terminating.' \
                     'Check variable "locked".')
-                    exit()
+                    sys.exit(1)
             print('OK')
-        sleep(2)
         redb.set('locked', 0 if unlock else 1)
 
 
@@ -81,18 +124,20 @@ def check_redis(data=None):
         if redb.get(data):
             print('Content of "{}":\t"{}"'.format(data, redb.get(data).decode('utf-8')))
         else:
-            print('Data "{}" is not set (empty).'.format(data))
+            print('Variable "{}" is not set.'.format(data))
     else:
         if redb.keys():
-            print('The following data are set:\n\t{}'.format('\n\t'.join \
-                ([k.decode('utf-8') for k in redb.keys()])))
+            print('The following variables have values:\n \'{}\''.format \
+                ('\'\n \''.join([k.decode('utf-8') for k in redb.keys()])))
         else:
-            print('No data are set in Redis database.')
+            print('No variables in Redis database.')
 
 
-def start_lstg():
+def start_lstg(debug_mode=False):
     print('Flushing Redis database.')
     redb.flushdb()
+    if debug_mode == '-d':
+        proc_args.insert(4, debug_mode_fp)
     subprocess.Popen(proc_args, stdin=subprocess.PIPE, stdout=subprocess.PIPE, \
         stderr=subprocess.PIPE )
     lock_redis()
@@ -100,11 +145,14 @@ def start_lstg():
     redb.set('repairer_status', 'starting')
     lock_redis(unlock=True)
     print('Starting LST-guard: lst_poller & lst_repairer initiated.')
+    if debug_mode:
+        print('Note: lst_repairer runs in debug mode, edits will be saved in:' \
+            ' [{}].'.format(debug_mode_fp))
 
 
-def restart_lstg():
+def restart_lstg(debug_mode=False):
     stop_lstg()
-    print('Waiting for processes to stop. This might take 5-10 seconds...')
+    print('Waiting for processes to stop. This might take 5-20 seconds...')
     still_running = True
     while(still_running):
         sleep(2)
@@ -112,7 +160,7 @@ def restart_lstg():
             and redb.get('repairer_status').decode('utf-8') == 'stopped':
             still_running = False
     print('All processes stopped. Preparing to restart service.')
-    start_lstg()
+    start_lstg(debug_mode)
 
 
 def stop_lstg():
@@ -120,7 +168,7 @@ def stop_lstg():
     redb.set('poller_status', 'stopping')
     redb.set('repairer_status', 'stopping')
     lock_redis(unlock=True)
-    print('Stopping LST-guard: message sent to lst_poller & lst_repairer.')
+    print('Stopping LST-guard: signal sent to lst_poller & lst_repairer.')
 
 
 def get_status():
@@ -128,9 +176,11 @@ def get_status():
         else redb.get('poller_status').decode('utf-8')
     repairer = 'Not started' if not redb.get('repairer_status') \
         else redb.get('repairer_status').decode('utf-8')
-    print('\nLST-Guard processes:\nlst_poller:\t{}\nlst_repairer:\t{}\n\n' \
-    'Note: After sending stop signal it might take 5-10s for the processes ' \
-    'to finlize, cleanup and exit.'.format(poller.upper(),repairer.upper()))
+    print('\nProcesses:\tStatus:\nlst_poller\t{}\nlst_repairer\t{}\n'.format \
+        (poller.upper(),repairer.upper()))
+    if repairer == 'running debug mode':
+        print('Note: lst_repairer runs in debug mode, edits are saved in [{}].' \
+            .format(debug_mode_fp))
 
 
 def check_config():
@@ -148,7 +198,7 @@ def check_config():
         config.read_file(open(config_fp))
     except:
         print('Error: config file [{}] not found. Exiting.'.format(config_fp))
-        exit()
+        sys.exit(1)
     else:
         for section in required_fields.keys():
             if not config.has_section(section):
@@ -169,48 +219,13 @@ def check_config():
                 else:
                     print('  missing or empty in section [{}]: {}'.format(section, ', '.join(missing_fields[section])))
             print('Exiting')
-            exit()
+            sys.exit(1)
         else:
-            print('Check: config file [{}]: Success.'.format(config_fp))
+            print('Check: config file [{}]: OK.'.format(config_fp))
             return (config.get('redis database', 'host'), \
                     config.get('redis database', 'port'), \
                     config.get('redis database', 'db'))
 
-
-def print_usage():
-    print("""
-
-    LST-Guard manager: start, restart, stop or status the service.
-    Calls app.py to start the service (lst_poller and lst_repairer) and uses
-    Redis to send stop message to these processes.
-
-    REQUIREMENTS:
-        To start service, a Redis-server must be running and a valid config file
-        available.
-
-    ARGUMENTS:
-        Required (one of):
-            -status            Show status of service (see details below)
-            -start             Start service
-            -stop              Stop service, processes will finilize and stop
-            -restart           Restart service, processes will finilize and restart
-            -redis             Show is Redis-server is running and available data
-            -help              Print this message
-        Optional:
-            -redis data        Print content of data
-
-    STATUS:
-            'Not started'      Service has not been started
-            'Starting'         app.py is called to start service
-            'Running'          Processes are running
-            'Stopping'         Stop signal send to processes
-            'Processes'        Processes finilized and exited successfully
-
-    EXAMPLES:
-        Start Lst-guard:
-        ./lst_manager -start
-    """
-    )
 
 if __name__ == '__main__':
     run()

@@ -15,13 +15,11 @@ Expected arguments:
         - debug_mode_fp
 """
 global langs, proj, config_fp, dbg_fp, m_name
-# initialize to avoid NameError
-config_fp = dbg_fp = None
-# module name for logger
-m_name = 'APP'
+config_fp = dbg_fp = None # initialize to avoid NameError
+m_name = 'APP' # module name for logger
 
 logging.basicConfig(
-            filename='log.lst',
+            filename='lst_guard.log',
             level=logging.INFO,
             format='%(asctime)s:%(levelname)s:%(message)s')
 
@@ -66,13 +64,15 @@ def set_args():
 def start_poller():
     logging.info('[{}] Starting poller on [{}] ({})'.format(m_name, proj, \
         ', '.join(langs)))
-    lst_poller.run(proj, lang)
+    print('running poller on [{}] ({})'.format(proj, ', '.join(langs)))
+    #lst_poller.run(proj, lang)
 
 
 def start_repairer():
     logging.info('[{}] Starting repairer in {} mode'.format \
         (m_name, 'DEBUG' if dbg_fp else 'normal'))
-    lst_repairer.run(dbg_fp)
+    print('running repairer in debug mode' if dbg_fp else 'running repairer normally')
+    #lst_repairer.run(dbg_fp)
 
 
 def load_config():
