@@ -1,32 +1,125 @@
-import lst_poller, lst_repairer
+
 import logging
-from sys import argv
+import sys
 from multiprocessing import Process
+from configparser import ConfigParser
+import lst_poller
+import lst_repairer
 
-logging.basicConfig(filename='logs_lst.txt',
-                    level=logging.INFO,
-                    format='%(asctime)s:%(levelname)s:%(message)s')
-global lang, proj, DEBUG_MODE
-DEBUG_MODE = True
 
-def set_args():
-    assert len(argv) <= 11, 'Too many arguments given' # max 11 args, i.e. max 9 languages
-    global lang, proj
-    if len(argv) > 2:
-        proj, lang = argv[1], argv[2:]
-    else:
-        proj = proj, lang = '', []
+"""
+Expected arguments:
+    Required:
+        - config_fp
+    Optional:
+        - debug_mode_fp
+"""
+global langs, proj, config_fp, dbg_fp, m_name
+# initialize to avoid NameError
+config_fp = dbg_fp = None
+# module name for logger
+m_name = 'APP'
 
-def start_poller():
-    lst_poller.run(proj, lang)
+logging.basicConfig(
+            filename='log.lst',
+            level=logging.INFO,
+            format='%(asctime)s:%(levelname)s:%(message)s')
 
-def start_repairer():
-    lst_repairer.run()
 
 def run():
     set_args()
+    load_config()
+    logging.info('[{}] Checked argv and config: OKAY.'.format(m_name))
     Process(target=start_poller).start()
     Process(target=start_repairer).start()
+
+
+def set_args():
+    """
+    Copies command line arguments to global variables.
+    Accepted arguments:
+        Required:
+            argv[1] -   config file
+        Optional:
+            argv[2] -   debug mode file
+
+    Will terminate if arguments are invalid.
+    """
+    global config_fp, dbg_fp
+    # Allow only 1 or 2 arguments
+    if len(sys.argv) == 2 or len(sys.argv) == 3:
+        # first argument is config file
+        config_fp = sys.argv[1]
+        # second argument (optional) is debug mode file
+        if len(sys.argv) == 3:
+            dbg_fp = sys.argv[2]
+    else:
+        if len(sys.argv) < 2:
+            logging.warning('[{}] Too few arguments [{}]. 2 or 3 expected.' \
+            ' Terminating.'.format(m_name, ' '.join(sys.argv)))
+        elif len(sys.argv) > 3:
+            logging.warning('[{}] Too many arguments [{}]. 2 or 3 expected.' \
+            ' Terminating.'.format(m_name, ' '.join(sys.argv)))
+        sys.exit(2)
+
+
+def start_poller():
+    logging.info('[{}] Starting poller on [{}] ({})'.format(m_name, proj, \
+        ', '.join(langs)))
+    lst_poller.run(proj, lang)
+
+
+def start_repairer():
+    logging.info('[{}] Starting repairer in {} mode'.format \
+        (m_name, 'DEBUG' if dbg_fp else 'normal'))
+    lst_repairer.run(dbg_fp)
+
+
+def load_config():
+    """
+    Load from config file:
+        proj    -   project to run on service  (string)
+        langs   -   list of languages to run on (list of strings)
+
+    Additionally we check that both variables are in the list of supported
+    projects and languages (also loaded from config file).
+
+    Will terminate if options are invalid.
+    """
+    global langs, proj
+    try:
+        config = ConfigParser()
+        config.read_file(open(config_fp))
+    except:
+        logging.warning('[{}] Unable to open config [{}]. Terminating'.format \
+            (m_name, config_fp))
+        sys.exit(1)
+    else:
+        langs = config.get('run on', 'languages').split()
+        proj = config.get('run on', 'project')
+        supported_langs = config.get('supported', 'languages').split()
+        supported_projs = config.get('supported', 'projects')
+        # Check if all selected languages are supported
+        not_supported = []
+        for lang in langs:
+            if lang not in supported_langs:
+                not_supported.append(lang)
+        # Both languages and project not supported
+        if not_supported and proj not in supported_projs:
+            logging.warning('[{}] Not supported language(s) {} and project' \
+                ' [{}]. Terminating'.format(m_name, not_supported, proj))
+            sys.exit(1)
+        # Only languages not supported
+        elif not_supported:
+            logging.warning('[{}] Not supported language(s) {}. Terminating' \
+            ''.format(m_name, not_supported))
+            sys.exit(1)
+        # Project not supported
+        elif proj not in supported_projs:
+            logging.warning('[{}] Not supported project [{}]. Terminating' \
+            ''.format(m_name, proj))
+            sys.exit(1)
+
 
 if __name__ == '__main__':
     run()
