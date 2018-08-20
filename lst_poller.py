@@ -27,8 +27,9 @@ def run(proj, langs, db_params):
     for modified section labels.
 
     Required arguments:
-    - proj (string)             - the Wikimedia project to watch on
-    - langs (list of strings)   - the language versions of project
+    - proj (string)                 - the Wikimedia project to watch on
+    - langs (list of strings)       - the language versions of project
+    - dp_parms (tuple of 3 strings) - host, port and id of Redis db
 
     After each 100 edits, checks redis status, if stop signal is received will
     exit.
@@ -172,16 +173,18 @@ def check_revision(revids, url, lang):
         Dict with modified labels: old label as key, new label as value. (Dict
         is empty if are no modified labels were found.)
     """
-    old_text, new_text = get_diff(revids, url)
-    old_labels = get_labels(old_text, lang)
-    new_labels = get_labels(new_text, lang)
-
     changed_labels = {}
+    old_text, new_text = get_diff(revids, url)
+    if old_text and new_text:
+        old_labels = extract_labels(old_text, lang)
+        new_labels = extract_labels(new_text, lang)
 
-    if len(old_labels) == len(new_labels): # Compare number of lables
-        for old, new in zip(old_labels, new_labels):
-            if old != new:
-                changed_labels[old] = new
+        if old_labels and new_labels:
+            # Compare number of lables
+            if len(old_labels) == len(new_labels):
+                for old, new in zip(old_labels, new_labels):
+                    if old != new:
+                        changed_labels[old] = new
     return changed_labels
 
 
@@ -196,6 +199,7 @@ def get_diff(revids, url):
     Returns: Tuple of two strings
 
     """
+    # TODO Exception handling
     resp = (requests.get(url, params = {
                         'action': 'query',
                         'prop': 'revisions',
@@ -209,18 +213,27 @@ def get_diff(revids, url):
 
     # Decode to make sure non-latin characters are displayed correctly
     js = json.loads(resp.content.decode('utf-8'))
-    assert ('badrevids' not in js['query'].keys()), 'Incorrect revision IDs'
+
+    # Check for error (if true, means wrong revision IDs were sent)
+    if ('badrevids' in js['query'].keys()):
+        return None, None
 
     # Find page id(s) in json, shouldn't be more than 1
     pageid = list(js['query']['pages'].keys())
-    assert (len(pageid) == 1), 'Revision IDs from different pages'
+
+    # Check for error (Revision IDs from different pages)
+    # TODO: WTH is this?
+    if not (len(pageid) == 1):
+        return None, None
+
+    # Else everything is ok
     pageid = pageid[0]
     diffs = js['query']['pages'][pageid]['revisions']
 
     return diffs[0]['*'], diffs[1]['*']
 
 
-def get_labels(wikitext, lang):
+def extract_labels(wikitext, lang):
     """
     Retrieve section labels from a wiki-page. The label syntax is obtained
     from the localizations file. Checks for both, localized and English syntax.
