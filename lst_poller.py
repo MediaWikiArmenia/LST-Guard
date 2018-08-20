@@ -1,66 +1,129 @@
-# !/usr/local/bin/python3
+#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
-import json, requests, time, re, redis, atexit #DEBUG do we need atexit?
+import json
+import requests
+import time
+import re
+import redis
+import logging
+import sys
 from sseclient import SSEClient as EventSource
-from configparser import ConfigParser
 from localizations import section_label
 
-# Declare global variables
-global supported_projects, supported_languages, run_on_project, run_on_languages
+global redb, redb_params
 
-def run(proj=None, langs=None, dbg_mode=False):
+logging.basicConfig(
+            filename='logs/poller.log',
+            level=logging.INFO,
+            format='%(asctime)s:%(levelname)s:%(message)s')
+
+
+def run(proj, langs, db_params):
     """
     Main routine. Reads the recent changes stream from EventSource (includes
     edits from all wikimedia projects), filters out edits in the specified
-    project and langauge(s) and sends to the function check_edit() to check
+    project and langauge(s) and sends further through the pipline to check
     for modified section labels.
 
-    Optional arguments:
+    Required arguments:
     - proj (string)             - the Wikimedia project to watch on
     - langs (list of strings)   - the language versions of project
 
-    If no arguments are provided, they are loaded from config.ini
+    After each 100 edits, checks redis status, if stop signal is received will
+    exit.
     """
-    # Load global variables from config
-    load_config()
-    # Identify project which will be watched
-    if not proj:
-        proj = run_on_project
-    assert (proj in supported_projects), 'Not supported project'
-    if not langs:
-        langs = run_on_languages
-    assert (l in supported_languages for l in langs), 'Not supported language(s)'
+    # Open Redis
+    open_redis(db_params)
+    set_redis_status('running')
 
     # Start watching recent changes
-    print('Watching recent changes in {} ({})'.format(proj, ', '.join(langs)))
+    logging.info('[RUN] Watching recent changes in {} ({})'.format(proj, \
+        ', '.join(langs)))
     stream_url = 'https://stream.wikimedia.org/v2/stream/recentchange'
+    stream_count = 0
+    checked_count = 0
     for event in EventSource(stream_url):
+        stream_count+=1
         if event.event == 'message':
             try:
                 item = json.loads(event.data) # Create dict with edit details
             except ValueError:
-                print('Unable to parse event data. Skipping')
+                logging.warning('[RUN] Unable to parse event data. Skipping')
             else:
                 # split server url to get language and project
                 server = item['server_name'].split('.')
                 # Filter out edits in specified project and language(s)
-                # TODO add namespace filter
-                if (server[0] in langs and server[1] == proj and item['type'] \
-                    == 'edit' and item['namespace'] == 104):
-                    print('New revision in page "{}" ({}).\n Checking...'
-                        .format(item['title'], server[0]))
+                if server[1] == proj and server[0] in langs and item['type'] \
+                    == 'edit' and item['namespace'] == 104:
+                    logging.info('[RUN] Checking new revision in page [{}] ' \
+                        '({}).'.format(item['title'], server[0]))
                     check_edit(item)
+                    checked_count += 1
+                # Do checks every 100 edits
+                if not (stream_count%100):
+                    green_light = check_redis_status()
+                    # Means stop signal received
+                    if not green_light:
+                        logging.info('[RUN] In total {} edits checked out of ' \
+                        ' {}'.format(checked_count, stream_count))
+                        set_redis_status('stopped')
+                        logging.info('[RUN] Stop signal received. Stopping.')
+                        sys.exit(0)
+                # Log every 10000 edits
+                if not (stream_count%10000):
+                    logging.info('[RUN] So far {} edits checked out of {}' \
+                        .format(checked_count, stream_count))
 
 
-def load_config():
-    global supported_projects, supported_languages, run_on_project, run_on_languages
-    config = ConfigParser()
-    config.readfp(open(r'config.ini'))
-    supported_projects = config.get('supported', 'projects').split()
-    supported_languages = config.get('supported', 'languages').split()
-    run_on_project = config.get('run on', 'project')
-    run_on_languages = config.get('run on', 'languages').split()
+def open_redis(db_params):
+    host, port, id = db_params
+    global redb
+    try:
+        r = redis.StrictRedis(host=redb_host, port=redb_port, db=redb_id)
+        r.client_list()
+    except:
+        logging.warning('[OPEN_REDIS] Unable to open Redis DB (host: {}, port:'\
+        ' {}, db: {}). Terminating'.format(host, port, id))
+        sys.exit(1)
+    else:
+        redb = r
+        logging.info('[OPEN_REDIS] Redis DB running OK (host: {}, port: {}, ' \
+        'db: {})'.format(host, port, id))
+
+
+def set_redis_status(status):
+    lock_redis()
+    redb.set('poller_status', status)
+    lock_redis(unlock=True)
+    logger.info('[SET_REDIS_STATUS] Set status to {}'.format(status.upper()))
+
+
+def check_redis_status():
+    status = redb.get('poller_status')
+    return False if status == 'stopping' else True
+
+
+def lock_redis(unlock=False):
+    if unlock:
+        redb.set('locked', 0)
+    else:
+        # Check if locked is set
+        if not redb.get('locked'):
+            redb.set('locked', 0 if unlock else 1)
+        elif int(redb.get('locked')):
+            logger.info('[LOCK_REDIS] Waiting 10s for Redb to unlock')
+            waited = 0
+            while (int(redb.get('locked'))):
+                sleep(0.01)
+                waited += 1
+                if waited > 10000: # we waited 100s
+                    logger.warning('[LOCK_REDIS] Unable to lock Redb. ' \
+                    'Terminating.')
+                    sys.exit(1)
+            logger.info('[LOCK_REDIS] Unlocked after {}s'.format(waited/100))
+        redb.set('locked', 1)
+
 
 def check_edit(item):
     """
@@ -85,14 +148,13 @@ def check_edit(item):
 
     # If there are any changed labels, write data to Redis
     if changed_labels:
-        print(' {} changed label(s) detected...'.format(len(changed_labels)))
+        logger.info('[CHECK_EDIT] {} changed label(s) detected in []' \
+            .format(len(changed_labels), item['title']))
         data = {    'title': item['title'],
                     'lang': lang,
                     'url': url,
                     'labels': changed_labels }
         write_data(data)
-    else:
-        print(' No changed labels: PASS')
 
 
 def check_revision(revids, url, lang):
@@ -188,22 +250,15 @@ def write_data(new_item):
     merged into it. Matching label names in old and new data are handled
     distinctly (see comments below).
     """
-    r = redis.StrictRedis(host='localhost', port=7777, db=0)
 
-    # Wait if Redis is locked
-    # TODO: if accidentaly locked is 1, the program will get stuck here
-    if r.get('locked'): # Check if 'locked' variable exists
-        while int(r.get('locked')): # Check if value is '1' (i.e. "true")
-            time.sleep(0.01)
-    r.set('locked', 1)
-
+    lock_redis()
     # If Redis is not empty, first load older data
     all_data = []
-    if not r.get('empty'): # Make sure 'empty' variable exists
-        r.set('empty', 1)
-    if int(r.get('empty')) == 0: # Means not empty
+    if not redb.get('empty'): # Make sure 'empty' variable exists
+        redb.set('empty', 1)
+    elif int(redb.get('empty')) == 0: # Means not empty
         # We get a list of saved edits each as a dict. See also check_edit().
-        all_data = json.loads(r.get('lstdata').decode('utf-8'))
+        all_data = json.loads(redb.get('lstdata').decode('utf-8'))
 
     # Merge new data into old data. For identical lables do further checks
     if len(all_data) > 0:
@@ -232,7 +287,7 @@ def write_data(new_item):
     all_data.append(new_item)
 
     # Write merged data into Redis
-    r.set('lstdata', json.dumps(all_data))
-    r.set('empty', 0)
-    r.set('locked', 0)
-    print(' Saved to check transclusions later: DONE')
+    redb.set('lstdata', json.dumps(all_data))
+    redb.set('empty', 0)
+    lock_redis(unlock=True)
+    logging.info('[WRITE_DATA] Saved data in Redb')

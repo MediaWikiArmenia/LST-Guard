@@ -112,11 +112,11 @@ def lock_redis(unlock=False):
                 sleep(0.01)
                 waited += 1
                 if waited > 1000: # we waited 10s
-                    print('\nError: Unable to lock Redb, terminating.' \
+                    print('\nError: Unable to lock Redb. Terminating.' \
                     'Check variable "locked".')
                     sys.exit(1)
             print('OK')
-        redb.set('locked', 0 if unlock else 1)
+        redb.set('locked', 1)
 
 
 def check_redis(data=None):
