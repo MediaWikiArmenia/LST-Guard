@@ -16,7 +16,7 @@ proc_args = ['nohup', 'python3', 'dumb.py', config_fp, '&']
 __doc__ = """
 LST-Guard manager: start, restart, stop or status the service.
 
-Calls app.py to start the service (lst_poller and lst_repairer) and uses
+Calls app.py to start the service (lst_poller and lst_worker) and uses
 Redis to send stop signals, get status or check data.
 
 REQUIREMENTS:
@@ -33,10 +33,11 @@ ARGUMENTS:
         -help              Print this message
 
     Optional:
-        -start -d          Start in dubug mode, no edits will be made,
+    with -start/-restart:
+        -d --debug         Start in dubug mode, no edits will be made,
                            instead edits will be stored in "{}"
-        -restart -d        Same as above
-        -redis variable    Print content of "variable"
+    with -redis:
+        variable           Print content of "variable" in Redis db
 
 STATUS:
         'Not started'      Service has not been started
@@ -50,6 +51,7 @@ EXAMPLES:
     ./lst_manager -start
 """.format(debug_mode_fp)
 
+# TODO add option to export Redis
 
 def run():
     global debug_mode
@@ -61,25 +63,32 @@ def run():
                     '-status':get_status,
                     '-redis':check_redis
                     }
+    # Exit if arguments are invalid
+    check_argv(run_option.keys())
+    # Option/arguments are ok, continue
+    print('\n## LST-Guard Manager ##\n')
+    # Check config file and Redis db
+    open_redis()
+    # Run the requested option
+    if len(sys.argv)==2:
+        run_option[sys.argv[1]]()
+    else:
+        run_option[sys.argv[1]](sys.argv[2])
+
+
+def check_argv(options):
     if len(sys.argv)<2 or len(sys.argv)>3 or sys.argv[1]=='-help':
         print(__doc__)
         sys.exit(2)
-    elif sys.argv[1] not in run_option.keys():
+    elif sys.argv[1] not in options:
         print('Unrecognized option "{}". Use "-help" for help'.format(sys.argv[1]))
         sys.exit(2)
-    elif sys.argv[1] in ('-start','-restart') and len(sys.argv)==3 and sys.argv[2] != '-d':
+    elif sys.argv[1] in ('-start','-restart') and len(sys.argv)==3 and sys.argv[2] not in ('--debug','-d'):
         print('Unrecognized argument "{}". Use "-help" for help'.format(sys.argv[2]))
         sys.exit(2)
     elif sys.argv[1] in ('-stop','-status','-help') and len(sys.argv)==3:
         print('Unrecognized argument "{}". Use "-help" for help'.format(sys.argv[2]))
         sys.exit(2)
-    # Option/arguments are ok, continue
-    print('\n## LST-Guard Manager ##\n')
-    open_redis()
-    if len(sys.argv)==2:
-        run_option[sys.argv[1]]()
-    else:
-        run_option[sys.argv[1]](sys.argv[2])
 
 
 def open_redis():
@@ -133,20 +142,20 @@ def check_redis(data=None):
             print('No variables in Redis database.')
 
 
-def start_lstg(debug_mode=False):
+def start_lstg(option=False):
     print('Flushing Redis database.')
     redb.flushdb()
-    if debug_mode == '-d':
+    if option in ('--debug','-d'):
         proc_args.insert(4, debug_mode_fp)
     subprocess.Popen(proc_args, stdin=subprocess.PIPE, stdout=subprocess.PIPE, \
         stderr=subprocess.PIPE )
     lock_redis()
     redb.set('poller_status', 'starting')
-    redb.set('repairer_status', 'starting')
+    redb.set('worker_status', 'starting')
     lock_redis(unlock=True)
-    print('Starting LST-guard: lst_poller & lst_repairer initiated.')
+    print('Starting LST-guard: lst_poller & lst_worker initiated.')
     if debug_mode:
-        print('Note: lst_repairer runs in debug mode, edits will be saved in:' \
+        print('Note: lst_worker runs in debug mode, edits will be saved in:' \
             ' [{}].'.format(debug_mode_fp))
 
 
@@ -157,7 +166,7 @@ def restart_lstg(debug_mode=False):
     while(still_running):
         sleep(2)
         if redb.get('poller_status').decode('utf-8') == 'stopped' \
-            and redb.get('repairer_status').decode('utf-8') == 'stopped':
+            and redb.get('worker_status').decode('utf-8') == 'stopped':
             still_running = False
     print('All processes stopped. Preparing to restart service.')
     start_lstg(debug_mode)
@@ -166,24 +175,25 @@ def restart_lstg(debug_mode=False):
 def stop_lstg():
     lock_redis()
     redb.set('poller_status', 'stopping')
-    redb.set('repairer_status', 'stopping')
+    redb.set('worker_status', 'stopping')
     lock_redis(unlock=True)
-    print('Stopping LST-guard: signal sent to lst_poller & lst_repairer.')
+    print('Stopping LST-guard: signal sent to lst_poller & lst_worker.')
 
 
 def get_status():
     poller = 'Not started' if not redb.get('poller_status') \
         else redb.get('poller_status').decode('utf-8')
-    repairer = 'Not started' if not redb.get('repairer_status') \
-        else redb.get('repairer_status').decode('utf-8')
-    print('\nProcesses:\tStatus:\nlst_poller\t{}\nlst_repairer\t{}\n'.format \
-        (poller.upper(),repairer.upper()))
-    if repairer == 'running debug mode':
-        print('Note: lst_repairer runs in debug mode, edits are saved in [{}].' \
+    worker = 'Not started' if not redb.get('worker_status') \
+        else redb.get('worker_status').decode('utf-8')
+    print('\nProcesses:\tStatus:\nlst_poller\t{}\nlst_worker\t{}\n'.format \
+        (poller.upper(),worker.upper()))
+    if worker == 'running debug mode':
+        print('Note: lst_worker runs in debug mode, edits are saved in [{}].' \
             .format(debug_mode_fp))
 
 
 def check_config():
+    # TODO, if debug mode don't require usr/psw
     """
     Validate config.ini and return Redis db details that we need.
     """
@@ -194,6 +204,13 @@ def check_config():
                         'redis database':   ['host', 'port', 'db']
                         }
     config = ConfigParser()
+    # Only require credentials for start/restart and not debug mode
+    require_credentials = False
+    if sys.argv[1] in ('-start','-restart') and not ('-d' in sys.argv \
+        or '--debug' in sys.argv):
+        require_credentials = True
+        print('require_credentials')
+    # Try to read config file
     try:
         config.read_file(open(config_fp))
     except:
@@ -202,29 +219,41 @@ def check_config():
     else:
         for section in required_fields.keys():
             if not config.has_section(section):
+                # Entire section is missing
                 missing_fields[section] = None
             else:
-                for option in required_fields[section]:
-                    # Check both that the option label and argument are present
+                # Section is there: check is all parameters are present
+                for param in required_fields[section]:
+                    # Check that parameter label and value are both present
                     # Eg. "password = " without the actual password itself will
-                    # be noted as missing option
-                    if not config.has_option(section, option) or not \
-                        config.get(section, option, fallback=False):
-                        missing_fields[section] = missing_fields.get(section,[]) + [option]
+                    # be noted as missing parameter
+                    if not config.has_option(section, param) or not \
+                        config.get(section, param, fallback=False):
+                        missing_fields[section] = missing_fields.get(section,[]) + [param]
+        # Print warnings
         if missing_fields:
-            print('Error: missing or empty fields in [config.ini]:')
-            for section in missing_fields.keys():
-                if not missing_fields[section]:
-                    print('  [{}] section missing'.format(section))
-                else:
-                    print('  missing or empty in section [{}]: {}'.format(section, ', '.join(missing_fields[section])))
-            print('Exiting')
-            sys.exit(1)
-        else:
-            print('Check: config file [{}]: OK.'.format(config_fp))
-            return (config.get('redis database', 'host'), \
-                    config.get('redis database', 'port'), \
-                    config.get('redis database', 'db'))
+            print(missing_fields)
+            if not require_credentials and list(missing_fields.keys()) == ['credentials']:
+                print('Warning: credentials missing from config (not required for this operation).')
+            else:
+                print('Error: missing or empty fields in [config.ini]:')
+                for section in missing_fields.keys():
+                    # Only print if missing section is critical
+                    if require_credentials or section!='credentials':
+                        # Means empty section
+                        if not missing_fields[section]:
+                            print('  Missing section: [{}]'.format(section))
+                        # Some parameters are missing
+                        else:
+                            print('  Missing in section [{}]: {}'.format(section, \
+                            ', '.join(missing_fields[section])))
+                print('Exiting')
+                sys.exit(1)
+
+        print('Check: config file [{}]: OK.'.format(config_fp))
+        return (config.get('redis database', 'host'), \
+                config.get('redis database', 'port'), \
+                config.get('redis database', 'db'))
 
 
 if __name__ == '__main__':
