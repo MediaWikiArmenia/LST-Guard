@@ -14,10 +14,12 @@ from localizations import section_label
 global proc_name, redb
 proc_name = 'poller'
 
-logging.basicConfig(
-            filename='logs/poller.log',
-            level=logging.INFO,
-            format='%(asctime)s:%(levelname)s:%(message)s')
+logger = logging.getLogger('poller')
+_h = logging.FileHandler('logs/poller.log')
+_h.setFormatter(logging.Formatter('%(asctime)s:%(levelname)s:%(message)s'))
+logger.addHandler(_h)
+logger.setLevel(logging.INFO)
+logger.propagate = False
 
 
 def main(proj, langs, db_params):
@@ -41,7 +43,7 @@ def main(proj, langs, db_params):
     set_redis_status('running')
 
     # Start watching recent changes
-    logging.info('[MAIN] Watching recent changes in {} ({})'.format(proj, \
+    logger.info('[MAIN] Watching recent changes in {} ({})'.format(proj, \
         ', '.join(langs)))
     stream_url = 'https://stream.wikimedia.org/v2/stream/recentchange'
     stream_count = 0
@@ -52,44 +54,44 @@ def main(proj, langs, db_params):
             try:
                 item = json.loads(event.data) # Create dict with edit details
             except ValueError:
-                logging.warning('[MAIN] Unable to parse event data. Skipping')
+                logger.warning('[MAIN] Unable to parse event data. Skipping')
             else:
                 # split server url to get language and project
                 server = item['server_name'].split('.')
                 # Filter out edits in specified project and language(s)
                 if server[1] == proj and server[0] in langs and item['type'] \
                     == 'edit' and item['namespace'] == 104:
-                    logging.info('[MAIN] Checking new revision in page [{}] ' \
+                    logger.info('[MAIN] Checking new revision in page [{}] ' \
                         '({}).'.format(item['title'], server[0]))
                     check_edit(item)
                     checked_count += 1
                 # Do checks every 100 edits
-                if not (stream_count%100):
+                if not (stream_count%10): #TODO 100
                     green_light = check_redis_status()
                     if not green_light:
                         # Means stop signal received
-                        logging.info('[MAIN] In total {} edits checked out of ' \
+                        logger.info('[MAIN] In total {} edits checked out of ' \
                         ' {}'.format(checked_count, stream_count))
+                        logger.info('[MAIN] Stop signal received. Stopping.')
                         set_redis_status('stopped')
-                        logging.info('[MAIN] Stop signal received. Stopping.')
                         sys.exit(0)
                 # Log every 10000 edits
                 if not (stream_count%10000):
-                    logging.info('[MAIN] So far {} edits checked out of {}' \
+                    logger.info('[MAIN] So far {} edits checked out of {}' \
                         .format(checked_count, stream_count))
 
 
 def open_redis(db_params):
     host, port, id = db_params
     try:
-        r = redis.StrictRedis(host=redb_host, port=redb_port, db=redb_id)
+        r = redis.StrictRedis(host, port, id)
         r.client_list()
     except:
-        logging.warning('[OPEN_REDIS] Unable to open Redis DB (host: {}, port:'\
+        logger.warning('[OPEN_REDIS] Unable to open Redis DB (host: {}, port:'\
         ' {}, db: {}). Terminating'.format(host, port, id))
         sys.exit(1)
     else:
-        logging.info('[OPEN_REDIS] Redis DB running OK (host: {}, port: {}, ' \
+        logger.info('[OPEN_REDIS] Redis DB running OK (host: {}, port: {}, ' \
         'db: {})'.format(host, port, id))
         return r
 
@@ -102,7 +104,7 @@ def set_redis_status(status):
 
 
 def check_redis_status():
-    status = redb.get('{}_status'.format(proc_name))
+    status = redb.get('{}_status'.format(proc_name)).decode('utf-8')
     return False if status == 'stopping' else True
 
 
@@ -150,7 +152,7 @@ def check_edit(item):
 
     # If there are any changed labels, write data to Redis
     if changed_labels:
-        logger.info('[CHECK_EDIT] {} changed label(s) detected in []' \
+        logger.info('[CHECK_EDIT] {} changed label(s) detected in [{}]' \
             .format(len(changed_labels), item['title']))
         data = {    'title': item['title'],
                     'lang': lang,
@@ -304,4 +306,9 @@ def write_data(new_item):
     redb.set('lstdata', json.dumps(all_data))
     redb.set('empty', 0)
     lock_redis(unlock=True)
-    logging.info('[WRITE_DATA] Saved data in Redb')
+    logger.info('[WRITE_DATA] Saved data in Redb')
+
+
+if __name__ == '__main__':
+    p,l,host,port,id = sys.argv[1:]
+    main(p,l,(host,port,id))

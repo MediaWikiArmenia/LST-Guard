@@ -11,22 +11,24 @@ import lst_worker
 Expected arguments:
     Required:
         - config_fp
-    Optional:
-        - debug_mode
+        - running mode (debug or normal)
 """
 global config_fp, debug_mode, rdb, langs, proj, usr, pssw
 config_fp = debug_mode = None # initialize to avoid NameError
 
-logging.basicConfig(
-            filename='logs/app.log',
-            level=logging.INFO,
-            format='%(asctime)s:%(levelname)s:%(message)s')
+logger = logging.getLogger('app')
+_h = logging.FileHandler('logs/app.log')
+_h.setFormatter(logging.Formatter('%(asctime)s:%(levelname)s:%(message)s'))
+logger.addHandler(_h)
+logger.setLevel(logging.INFO)
+logger.propagate = False
 
 
 def run():
+    logger.info('[RUN] Starting the game')
     set_args()
     load_config()
-    logging.info('[RUN] Checked argv and config: OKAY.')
+    logger.info('[RUN] Checked argv and config: OKAY.')
     Process(target=start_poller).start()
     Process(target=start_worker).start()
 
@@ -34,42 +36,43 @@ def run():
 def set_args():
     """
     Copies command line arguments to global variables.
-    Accepted arguments:
-        Required:
+    Required arguments:
             argv[1] -   config file
-        Optional:
-            argv[2] -   debug mode file
+            argv[2] -   starting modedebug mode file
 
     Will terminate if arguments are invalid.
     """
     global config_fp, debug_mode
-    # Allow only 1 or 2 arguments
-    if len(sys.argv) == 2 or len(sys.argv) == 3:
+    # Accept only 3 arguments
+    arguments = list(sys.argv[:-1]) if sys.argv[-1] == '&' else list(sys.argv)
+    if len(arguments) == 3:
         # first argument is config file
-        config_fp = sys.argv[1]
-        # second argument (optional) is debug mode file
-        if len(sys.argv) == 3:
-            debug_mode = sys.argv[2]
+        config_fp = arguments[1]
+        # second argument contains starting mode
+        if arguments[2] == 'debug':
+            debug_mode = True
+        else:
+            debug_mode = False
     else:
-        if len(sys.argv) < 2:
-            logging.warning('[SET_ARGS] Too few arguments [{}]. 2 or 3 ' \
-            'expected. Terminating.'.format(' '.join(sys.argv)))
-        elif len(sys.argv) > 3:
-            logging.warning('[SET_ARGS] Too many arguments [{}]. 2 or 3 ' \
-            'expected. Terminating.'.format(' '.join(sys.argv)))
+        if len(arguments) < 2:
+            logger.warning('[SET_ARGS] Too few arguments [{}]. 3 ' \
+            'expected. Terminating.'.format(' '.join(arguments)))
+        elif len(arguments) > 3:
+            logger.warning('[SET_ARGS] Too many arguments [{}]. 3 ' \
+            'expected. Terminating.'.format(' '.join(arguments)))
         sys.exit(2)
 
 
 def start_poller():
-    logging.info('[START_POLLER] Starting poller on [{}] ({})'.format(proj, \
+    logger.info('[START_POLLER] Starting poller on [{}] ({})'.format(proj, \
         ', '.join(langs)))
-    lst_poller.run(proj, langs, rdb)
+    lst_poller.main(proj, langs, rdb)
 
 
 def start_worker():
-    logging.info('[START_worker] Starting worker in {} mode'.format \
+    logger.info('[START_worker] Starting worker in {} mode'.format \
         ('DEBUG' if debug_mode else 'normal'))
-    lst_worker.run(rdb, debug_mode, usr pssw)
+    lst_worker.main(rdb, debug_mode, usr, pssw)
 
 
 def load_config():
@@ -88,7 +91,7 @@ def load_config():
         config = ConfigParser()
         config.read_file(open(config_fp))
     except:
-        logging.warning('[LOAD_CONFIG] Unable to open config [{}]. Terminating' \
+        logger.warning('[LOAD_CONFIG] Unable to open config [{}]. Terminating' \
             .format(config_fp))
         sys.exit(1)
     else:
@@ -105,7 +108,7 @@ def load_config():
             usr = config.get('credentials', 'username')
             pssw = config.get('credentials', 'password')
         except:
-            logging.warning('[LOAD_CONFIG] Unable to load required data from ' \
+            logger.warning('[LOAD_CONFIG] Unable to load required data from ' \
                 'config [{}]. Terminating'.format(config_fp))
             sys.exit(1)
         else:
@@ -116,18 +119,18 @@ def load_config():
                     not_supported.append(lang)
             # Both project and languages not supported
             if not_supported and proj not in supported_projs:
-                logging.warning('[LOAD_CONFIG] Not supported language(s) ({}) ' \
+                logger.warning('[LOAD_CONFIG] Not supported language(s) ({}) ' \
                     'and project [{}]. Terminating'.format(', '.join(not_supported), \
                     proj))
                 sys.exit(1)
             # Languages not supported
             elif not_supported:
-                logging.warning('[LOAD_CONFIG] Not supported language(s) ' \
+                logger.warning('[LOAD_CONFIG] Not supported language(s) ' \
                     '({}). Terminating'.format(', '.join(not_supported)))
                 sys.exit(1)
             # Project not supported
             elif proj not in supported_projs:
-                logging.warning('[LOAD_CONFIG] Not supported project [{}]. ' \
+                logger.warning('[LOAD_CONFIG] Not supported project [{}]. ' \
                     'Terminating'.format(proj))
                 sys.exit(1)
 

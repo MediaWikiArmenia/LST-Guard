@@ -6,19 +6,22 @@ import requests
 import time
 import redis
 import re
+import logging
+import sys
 from configparser import ConfigParser
 from localizations import template, edit_summary
-from lst_poller import open_redis, lock_redis, set_redis_status, check_redis_status
 
 global proc_name, stop_button, user, pssw, redb, debug_mode, debug_fp
 debug_fp = 'debug_edits.html'
 proc_name = 'worker'
 stop_button = True  # While true bot will not edit any pages
 
-logging.basicConfig(
-            filename='logs/worker.log',
-            level=logging.INFO,
-            format='%(asctime)s:%(levelname)s:%(message)s')
+logger = logging.getLogger('worker')
+_h = logging.FileHandler('logs/worker.log')
+_h.setFormatter(logging.Formatter('%(asctime)s:%(levelname)s:%(message)s'))
+logger.addHandler(_h)
+logger.setLevel(logging.INFO)
+logger.propagate = False
 
 #TODO extend sleaping time to avoid edit conflict
 
@@ -50,35 +53,84 @@ def main(db_params, debug=False, username=None, password=None):
     redb = open_redis(db_params)
     set_redis_status('running')
 
-    logging.info('[MAIN] Starting worker in {} mode'.format('DEBUG' if \
+    logger.info('[MAIN] Starting worker in {} mode'.format('DEBUG' if \
         debug_mode else 'NORMAL'))
 
     while True:
         # See if there is new data:
-        if not r.get('empty'):
+        if not redb.get('empty'):
             # Make sure 'empty' is set in Redis
             lock_redis()
-            r.set('empty', 1)
+            redb.set('empty', 1)
             lock_redis(unlock=True)
-        elif not int(r.get('empty')):
+        elif not int(redb.get('empty')):
             # Means not empty, so continue
-            data = json.loads(r.get('lstdata').decode('utf-8'))
+            data = json.loads(redb.get('lstdata').decode('utf-8'))
             lock_redis()
-            r.delete('lstdata')
-            r.set('empty', 1)
+            redb.delete('lstdata')
+            redb.set('empty', 1)
             lock_redis(unlock=True)
-            logging.info('[MAIN] Loaded new data from Redis DB. Checking labels.')
+            logger.info('[MAIN] Loaded new data from Redis DB. Checking labels.')
             check_saved_data(data)
         # Sleep 5 minutes and in between check redis status
-        for i in range(100):
+        for i in range(10): #TODO set 100
             time.sleep(3)
             green_light = check_redis_status()
             if not green_light:
                 # Means stop signal received
-                logging.info('[MAIN] Stop signal received. Stopping.')
+                logger.info('[MAIN] Stop signal received. Stopping.')
                 # TODO before exiting check redis data again?
                 set_redis_status('stopped')
                 sys.exit(0)
+
+
+def open_redis(db_params):
+    host, port, id = db_params
+    try:
+        r = redis.StrictRedis(host, port, id)
+        r.client_list()
+    except:
+        logger.warning('[OPEN_REDIS] Unable to open Redis DB (host: {}, port:'\
+        ' {}, db: {}). Terminating'.format(host, port, id))
+        sys.exit(1)
+    else:
+        logger.info('[OPEN_REDIS] Redis DB running OK (host: {}, port: {}, ' \
+        'db: {})'.format(host, port, id))
+        return r
+
+
+def set_redis_status(status):
+    lock_redis()
+    redb.set('{}_status'.format(proc_name), status)
+    lock_redis(unlock=True)
+    logger.info('[SET REDIS STATUS] Set status to {}'.format(status.upper()))
+
+
+def check_redis_status():
+    status = redb.get('{}_status'.format(proc_name)).decode('utf-8')
+    return False if status == 'stopping' else True
+
+
+def lock_redis(unlock=False):
+    if unlock:
+        redb.set('locked', 0)
+    else:
+        # Check if locked is set
+        if not redb.get('locked'):
+            redb.set('locked', 0 if unlock else 1)
+        elif int(redb.get('locked')):
+            logger.info('[LOCK_REDIS] Waiting 10s for Redb to unlock')
+            waited = 0
+            while (int(redb.get('locked'))):
+                sleep(0.01)
+                waited += 1
+                if waited > 10000: # we waited 100s
+                    logger.warning('[LOCK_REDIS] Unable to lock Redb. ' \
+                    'Terminating.')
+                    sys.exit(1)
+            logger.info('[LOCK_REDIS] Unlocked after {}s'.format(waited/100))
+        redb.set('locked', 1)
+
 
 def check_saved_data(data):
     """
@@ -99,18 +151,18 @@ def check_saved_data(data):
         edits = 0
         transclusions = get_transclusions(page['title'], page['url'])
         if not transclusions:
-            logging.info('[check_saved_data] No transclusions in [{}]. Pass.' \
+            logger.info('[CHECK SAVED DATA] No transclusions in [{}]. Pass.' \
                 .format(page['title']))
         else:
-            logging.info('[check_saved_data] Found {} transclusions for [{}].' \
+            logger.info('[CHECK SAVED DATA] Found {} transclusions for [{}].' \
                 ' Checking...'.format(len(transclusions), page['title']))
             for transclusion in transclusions:
                 # Get source code of transcluding page
                 tr_content = get_pagecontent(page['url'], transclusion[0])
                 if tr_content:
                     # Update lables in content if necessary
-                    new_content, corrected_labels = fix_transclusion \
-                        (tr_content, page['title'],page['labels'],page['lang'])
+                    new_content, corrected_labels = fix_transclusion(tr_content, \
+                        page['title'],page['labels'],page['lang'])
                     if new_content:
                         # Means labels need to be updated
                         edit_sum,labels_sum = compose_summary(corrected_labels,\
@@ -124,24 +176,24 @@ def check_saved_data(data):
                                 edits += 1
                         else:
                             edited = edit_page(page['url'], transclusion[0], \
-                                new_tr_content, summary)
+                                new_content, summary)
                             if edited:
                                 edits += 1
                     else:
                         # Means no edit necessary
-                        logging.info('[check_saved_data] No edit necessary in' \
-                            '[{}]. Skipping'.format(transclusion[1]))
+                        logger.info('[CHECK SAVED DATA] No edit necessary in' \
+                            ' [{}]. Skipping'.format(transclusion[1]))
         # Update log for current page
         if edits:
-            logging.info('[check_saved_data] Done checking [{}]. In total {} ' \
+            logger.info('[CHECK SAVED DATA] Done checking [{}]. In total {} ' \
             'corrections were made in {} transclusions.'.format(page['title'], \
             edits,len(transclusions)))
         else:
-            logging.info('[check_saved_data] Done checking [{}] with {} ' \
-                'transclusions. No corrections are necessary'.format \
+            logger.info('[CHECK SAVED DATA] Done checking [{}] with {} ' \
+                'transclusion(s). No corrections are necessary'.format \
                 (page['title'], len(transclusions)))
     # Update log for current sessions
-    logging.info('[check_saved_data] Ending session. Checked transclusions of' \
+    logger.info('[CHECK SAVED DATA] Ending session. Checked transclusions of' \
         ' {} pages.'.format(len(data)))
 
 
@@ -167,7 +219,7 @@ def edit_debug_mode(transclusion, page, labels_sum):
         with open(debug_fp, 'a') as f:
             f.write('<br />'.join(write_data))
     except:
-        logging.warning('[edit_debug_mode] Failed to edit debug_mode file '\
+        logger.warning('[EDIT DEBUG MODE] Failed to edit debug_mode file '\
             '[{}]'.format(debug_fp))
         return False
     else:
@@ -196,9 +248,9 @@ def set_status_on_wiki(url, status):
             if not already_set:
                 #TODO localize summary
                 summary = 'Setting bot status to {}.'.format(status)
-                edit = edit_page(url, page, status_template, summary)
+                edit = edit_page(url, page, status_template, summary, force=True)
                 if edit: # Means edit was succes
-                    logging.info('[set_status_on_wiki] Set bot status to {} ' \
+                    logger.info('[SET STATUS ON WIKI] Set bot status to {} ' \
                         'in subpage [{}]'.format(status.upper(), page))
 
 
@@ -244,7 +296,7 @@ def get_transclusions(title, url):
         pid = [p for p in js['query']['pages'].keys()][0]
         transclusions = js['query']['pages'][pid]
     except:
-        logging.warning('[get_transclusions] Unable to get transcusions of ' \
+        logger.warning('[GET TRANSCLUSIONS] Unable to get transcusions of ' \
             '[{}]. Unexpected or no reply from API [{}]'.format(title,url))
         return None
     else:
@@ -373,30 +425,27 @@ def get_pagecontent(url, page):
     elif type(page) is str:
         parameters['titles'] = page
     else:
-        logging.warning('[get_pagecontent] Argument [{}] has invalid type ' \
+        logger.warning('[GET PAGECONTENT] Argument [{}] has invalid type ' \
             '[{}]. Expected int or str'.format(page,type(page)))
         return None
 
     try:
         resp = requests.get(url, params = parameters)
-        resp_code = resp.status_code
         js = json.loads(resp.content.decode('utf-8'))
     except:
-        logging.warning('[get_pagecontent] Unable to get content of [{}]. ' \
-            'Unexpected or no reply from API [{}]. Response code: {}.' \
-            .format(page,url,resp_code if resp_code else 'None'))
+        logger.warning('[GET PAGECONTENT] Unable to get content of [{}]. ' \
+            'Unexpected or no reply from API [{}].'.format(page,url,))
     else:
         pid = [p for p in js['query']['pages'].keys()][0]
-        print(pid)
         if 'revisions' in js['query']['pages'][pid].keys():
             return js['query']['pages'][pid]['revisions'][0]['*']
         else:
-            logging.warning('[get_pagecontent] Unable to get content of [{}].' \
+            logger.warning('[GET PAGECONTENT] Unable to get content of [{}].' \
                 ' API response: [{}]'.format(page,js['query']['pages'][pid]))
             return None
 
 
-def edit_page(url, page, page_content, summary):
+def edit_page(url, page, page_content, summary, force=False):
     """
     Edit wiki-page using provided credentials.
 
@@ -410,20 +459,21 @@ def edit_page(url, page, page_content, summary):
         True            - if edit was success
         False           - edit didn't succeed
     """
-    set_status_on_wiki(url, 'active')
-    if stop_button:
-        base_url = url.split('/')[2]
-        logging.info('[edit_page] Stop button is ON. No edits will be made '\
-            'until it is turned OFF again.'.format(base_url))
-        return False
+    if not force:
+        set_status_on_wiki(url, 'active')
+        if stop_button:
+            base_url = url.split('/')[2]
+            logger.info('[EDIT PAGE] Stop button is ON. No edits will be made '\
+                'until it is turned OFF again.'.format(base_url))
+            return False
 
     # Continue in normal mode
-    logging.info('[edit_page] Preparing to edit page [{}] through API [{}]' \
+    logger.info('[EDIT PAGE] Preparing to edit page [{}] through API [{}]' \
         .format(page,url))
     session = requests.Session()
 
     # Step 1: Request login token
-    logging.info('[edit_page] Logging in as [{}] in [{}]'.format(user, url))
+    logger.info('[EDIT PAGE] Logging in as [{}] in [{}]'.format(user, url))
     params = {  'action': 'query',
                 'meta': 'tokens',
                 'type': 'login',
@@ -431,12 +481,12 @@ def edit_page(url, page, page_content, summary):
     try:
         resp = session.get(url, params = params).json()
     except:
-        logging.warning('[edit_page] Unable to get login token. Unexpected ' \
+        logger.warning('[EDIT PAGE] Unable to get login token. Unexpected ' \
             'or no API response: {}'.format(resp if resp else 'None'))
         return False
     else:
         if not resp['query'] or not 'tokens' in resp['query']:
-            logging.warning('[edit_page] Login token request rejected. API ' \
+            logger.warning('[EDIT PAGE] Login token request rejected. API ' \
             'response: [{}]'.format(resp if resp else 'None'))
             return False
         login_token = resp['query']['tokens']['logintoken']
@@ -451,28 +501,28 @@ def edit_page(url, page, page_content, summary):
     try:
         resp = session.post(url, data = logindata).json()
     except:
-        logging.warning('[edit_page] Unable to login to project. Unexpected ' \
+        logger.warning('[EDIT PAGE] Unable to login to project. Unexpected ' \
             'or no API response: {}'.format(resp if resp else 'None'))
         return False
     else:
         if not resp['login'] or resp['login']['result'] != 'Success':
-            logging.warning('[edit_page] Log-in request rejected. API ' \
+            logger.warning('[EDIT PAGE] Log-in request rejected. API ' \
             'response: [{}]'.format(resp if resp else 'None'))
             return False
         del resp
 
     # Step 3: Request edit token
-    logging.info('[edit_page] Getting edit token....')
+    logger.info('[EDIT PAGE] Getting edit token....')
     params['type'] = 'csrf'
     try:
         resp = session.get(url, params = params).json()
     except:
-        logging.warning('[edit_page] Unable to get edit token. Unexpected or' \
+        logger.warning('[EDIT PAGE] Unable to get edit token. Unexpected or' \
             ' no API response: {}'.format(resp if resp else 'None'))
         return False
     else:
         if not resp or not 'tokens' in resp['query']:
-            logging.warning('[edit_page] Edit token request rejected. API ' \
+            logger.warning('[EDIT PAGE] Edit token request rejected. API ' \
                 'response: [{}]'.format(resp if resp else 'None'))
             return False
         edit_token = resp['query']['tokens']['csrftoken']
@@ -491,7 +541,7 @@ def edit_page(url, page, page_content, summary):
     elif type(page) is str:
         editdata['title'] = page
     else:
-        logging.warning('[edit_page] Argument [{}] has invalid type [{}]. ' \
+        logger.warning('[EDIT PAGE] Argument [{}] has invalid type [{}]. ' \
             'Expected int or str. Aborting edit.'.format(page,type(page)))
         return False
 
@@ -499,15 +549,15 @@ def edit_page(url, page, page_content, summary):
         resp = session.post(url, data = editdata).json()
         result = resp['edit']['result']
     except:
-        logging.warning('[edit_page] Edit request rejected. API response: [{}]'\
+        logger.warning('[EDIT PAGE] Edit request rejected. API response: [{}]'\
             .format(resp if resp else 'None'))
         return False
     else:
         if result == 'Success':
-            logging.info('[edit_page] Page [{}] edited successfully.'.format(page))
+            logger.info('[EDIT PAGE] Page [{}] edited successfully.'.format(page))
             return True
         else:
-            logging.warning('[edit_page] Edit of page [{}] failed. API ' \
+            logger.warning('[EDIT PAGE] Edit of page [{}] failed. API ' \
                 'response: [{}]'.format(page, resp if resp else 'None'))
             return False
 

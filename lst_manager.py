@@ -8,7 +8,7 @@ from configparser import ConfigParser
 
 global redb, redb_host, redb_port, redb_id, proc_args, config_fp
 config_fp = 'config.ini'
-proc_args = ['nohup', 'python3', 'app.py', config_fp, '&']
+proc_args = ['nohup', 'python3', 'app.py', config_fp, 'normal', '&']
 
 
 __doc__ = """
@@ -33,9 +33,11 @@ ARGUMENTS:
     Optional:
     with -start/-restart:
         -d --debug         Start in dubug mode, no edits will be made,
-                           instead edits will be stored in "{}"
+                           instead edits will be stored in html file.
     with -redis:
         variable           Print content of "variable" in Redis db
+        --flush             Flush Redis database
+        --export            TODO
 
 STATUS:
         'Not started'      Service has not been started
@@ -47,7 +49,7 @@ STATUS:
 EXAMPLES:
     Start Lst-guard:
     ./lst_manager -start
-""".format(debug_mode_fp)
+"""
 
 # TODO add option to export Redis
 
@@ -125,12 +127,15 @@ def lock_redis(unlock=False):
         redb.set('locked', 1)
 
 
-def check_redis(data=None):
-    if data:
-        if redb.get(data):
-            print('Content of "{}":\t"{}"'.format(data, redb.get(data).decode('utf-8')))
+def check_redis(option=None):
+    if option == '--flush':
+        print('Flushing Redis database. DONE')
+        redb.flushdb()
+    elif option:
+        if redb.get(option):
+            print('Content of "{}":\t"{}"'.format(option, redb.get(option).decode('utf-8')))
         else:
-            print('Variable "{}" is not set.'.format(data))
+            print('Variable "{}" is not set.'.format(option))
     else:
         if redb.keys():
             print('The following variables have values:\n \'{}\''.format \
@@ -139,12 +144,15 @@ def check_redis(data=None):
             print('No variables in Redis database.')
 
 
-def start_lstg(debug_mode=False):
+def start_lstg(option=False):
     print('Flushing Redis database.')
     redb.flushdb()
     if option in ('--debug','-d'):
         debug_mode = True
-        proc_args.insert(4, True)
+        proc_args[4] = 'debug'
+    else:
+        debug_mode = False
+    print(proc_args)
     subprocess.Popen(proc_args, stdin=subprocess.PIPE, stdout=subprocess.PIPE, \
         stderr=subprocess.PIPE )
     lock_redis()
@@ -157,7 +165,7 @@ def start_lstg(debug_mode=False):
             'debug file. Check [lst_worker.py] for filepath.')
 
 
-def restart_lstg(debug_mode=False):
+def restart_lstg(option=False):
     stop_lstg()
     print('Waiting for processes to stop. This might take 5-20 seconds...')
     still_running = True
@@ -167,7 +175,7 @@ def restart_lstg(debug_mode=False):
             and redb.get('worker_status').decode('utf-8') == 'stopped':
             still_running = False
     print('All processes stopped. Preparing to restart service.')
-    start_lstg(debug_mode)
+    start_lstg(option)
 
 
 def stop_lstg():
