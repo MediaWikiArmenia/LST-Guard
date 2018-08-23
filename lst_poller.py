@@ -11,7 +11,8 @@ import sys
 from sseclient import SSEClient as EventSource
 from localizations import section_label
 
-global redb, redb_params
+global proc_name, redb
+proc_name = 'poller'
 
 logging.basicConfig(
             filename='logs/poller.log',
@@ -19,7 +20,7 @@ logging.basicConfig(
             format='%(asctime)s:%(levelname)s:%(message)s')
 
 
-def run(proj, langs, db_params):
+def main(proj, langs, db_params):
     """
     Main routine. Reads the recent changes stream from EventSource (includes
     edits from all wikimedia projects), filters out edits in the specified
@@ -35,11 +36,12 @@ def run(proj, langs, db_params):
     exit.
     """
     # Open Redis
-    open_redis(db_params)
+    global redb
+    redb = open_redis(db_params)
     set_redis_status('running')
 
     # Start watching recent changes
-    logging.info('[RUN] Watching recent changes in {} ({})'.format(proj, \
+    logging.info('[MAIN] Watching recent changes in {} ({})'.format(proj, \
         ', '.join(langs)))
     stream_url = 'https://stream.wikimedia.org/v2/stream/recentchange'
     stream_count = 0
@@ -50,36 +52,35 @@ def run(proj, langs, db_params):
             try:
                 item = json.loads(event.data) # Create dict with edit details
             except ValueError:
-                logging.warning('[RUN] Unable to parse event data. Skipping')
+                logging.warning('[MAIN] Unable to parse event data. Skipping')
             else:
                 # split server url to get language and project
                 server = item['server_name'].split('.')
                 # Filter out edits in specified project and language(s)
                 if server[1] == proj and server[0] in langs and item['type'] \
                     == 'edit' and item['namespace'] == 104:
-                    logging.info('[RUN] Checking new revision in page [{}] ' \
+                    logging.info('[MAIN] Checking new revision in page [{}] ' \
                         '({}).'.format(item['title'], server[0]))
                     check_edit(item)
                     checked_count += 1
                 # Do checks every 100 edits
                 if not (stream_count%100):
                     green_light = check_redis_status()
-                    # Means stop signal received
                     if not green_light:
-                        logging.info('[RUN] In total {} edits checked out of ' \
+                        # Means stop signal received
+                        logging.info('[MAIN] In total {} edits checked out of ' \
                         ' {}'.format(checked_count, stream_count))
                         set_redis_status('stopped')
-                        logging.info('[RUN] Stop signal received. Stopping.')
+                        logging.info('[MAIN] Stop signal received. Stopping.')
                         sys.exit(0)
                 # Log every 10000 edits
                 if not (stream_count%10000):
-                    logging.info('[RUN] So far {} edits checked out of {}' \
+                    logging.info('[MAIN] So far {} edits checked out of {}' \
                         .format(checked_count, stream_count))
 
 
 def open_redis(db_params):
     host, port, id = db_params
-    global redb
     try:
         r = redis.StrictRedis(host=redb_host, port=redb_port, db=redb_id)
         r.client_list()
@@ -88,20 +89,20 @@ def open_redis(db_params):
         ' {}, db: {}). Terminating'.format(host, port, id))
         sys.exit(1)
     else:
-        redb = r
         logging.info('[OPEN_REDIS] Redis DB running OK (host: {}, port: {}, ' \
         'db: {})'.format(host, port, id))
+        return r
 
 
 def set_redis_status(status):
     lock_redis()
-    redb.set('poller_status', status)
+    redb.set('{}_status'.format(proc_name), status)
     lock_redis(unlock=True)
-    logger.info('[SET_REDIS_STATUS] Set status to {}'.format(status.upper()))
+    logger.info('[SET REDIS STATUS] Set status to {}'.format(status.upper()))
 
 
 def check_redis_status():
-    status = redb.get('poller_status')
+    status = redb.get('{}_status'.format(proc_name))
     return False if status == 'stopping' else True
 
 
@@ -269,7 +270,7 @@ def write_data(new_item):
     all_data = []
     if not redb.get('empty'): # Make sure 'empty' variable exists
         redb.set('empty', 1)
-    elif int(redb.get('empty')) == 0: # Means not empty
+    elif not int(redb.get('empty')): # Means not empty
         # We get a list of saved edits each as a dict. See also check_edit().
         all_data = json.loads(redb.get('lstdata').decode('utf-8'))
 

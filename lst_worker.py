@@ -1,22 +1,28 @@
 # !/usr/local/bin/python3
 # -*- coding: utf-8 -*-
 
-import json, requests, time, redis, re
-from getpass import getpass
+import json
+import requests
+import time
+import redis
+import re
 from configparser import ConfigParser
 from localizations import template, edit_summary
+from lst_poller import open_redis, lock_redis, set_redis_status, check_redis_status
 
-global stop_button, username, password
-config = ConfigParser()
-config.read_file(open(r'config.ini'))
-username = config.get('credentials', 'username')
-password = config.get('credentials', 'password')
-stop_button = True # Bot will not edit actual pages if this is True
+global proc_name, stop_button, user, pssw, redb, debug_mode, debug_fp
+debug_fp = 'debug_edits.html'
+proc_name = 'worker'
+stop_button = True  # While true bot will not edit any pages
 
-global DEBUG_MODE, DEBUG_LOG
-DEBUG_LOG = 'debug_mode_edits.html'
+logging.basicConfig(
+            filename='logs/worker.log',
+            level=logging.INFO,
+            format='%(asctime)s:%(levelname)s:%(message)s')
 
-def run(debug_mode=False):
+#TODO extend sleaping time to avoid edit conflict
+
+def main(db_params, debug=False, username=None, password=None):
     """
     Main Routine.
     Wakes up every 5 minutes to read new data from Redis. If there is new data,
@@ -29,122 +35,143 @@ def run(debug_mode=False):
 
     empty and locked are strings, since Redis has no boolean types.
     """
-    global DEBUG_MODE
-    DEBUG_MODE = debug_mode
-    try:
-        r = redis.StrictRedis(host='localhost', port=7777, db=0)
-        check_credentials()
-        while True:
-            if r.get('locked'): # Check if 'locked' is set in Redis
-                while int(r.get('locked')): # Wait if locked
-                    time.sleep(0.01)
-            if not r.get('empty'): # Make sure 'empty' is set in Redis
-                r.set('empty', 1)
-            if not int(r.get('empty')): # Continue if not empty
-                r.set('locked', 1)
-                data = json.loads(r.get('lstdata').decode('utf-8'))
-                r.delete('lstdata')
-                r.set('empty', 1)
-                r.set('locked', 0)
-                print('Checking saved labels...')
-                check_saved_data(data)
-                time.sleep(300)
-            else:
-                time.sleep(300)
-    except(KeyboardInterrupt, SystemExit):
-        #TODO exit gracefully
-        pass
+    # Check if we run in dubug mode
+    global debug_mode, user, pssw
+    if debug:
+        debug_mode = True
+        user = None
+        pssw = None
+    else:
+        debug_mode = False
+        user = username
+        pssw = password
+    # Open Redis
+    global redb
+    redb = open_redis(db_params)
+    set_redis_status('running')
 
+    logging.info('[MAIN] Starting worker in {} mode'.format('DEBUG' if \
+        debug_mode else 'NORMAL'))
+
+    while True:
+        # See if there is new data:
+        if not r.get('empty'):
+            # Make sure 'empty' is set in Redis
+            lock_redis()
+            r.set('empty', 1)
+            lock_redis(unlock=True)
+        elif not int(r.get('empty')):
+            # Means not empty, so continue
+            data = json.loads(r.get('lstdata').decode('utf-8'))
+            lock_redis()
+            r.delete('lstdata')
+            r.set('empty', 1)
+            lock_redis(unlock=True)
+            logging.info('[MAIN] Loaded new data from Redis DB. Checking labels.')
+            check_saved_data(data)
+        # Sleep 5 minutes and in between check redis status
+        for i in range(100):
+            time.sleep(3)
+            green_light = check_redis_status()
+            if not green_light:
+                # Means stop signal received
+                logging.info('[MAIN] Stop signal received. Stopping.')
+                # TODO before exiting check redis data again?
+                set_redis_status('stopped')
+                sys.exit(0)
 
 def check_saved_data(data):
     """
-    Checks if transclusions of pages need to be corrected.
-    Saved data must be a list of dicts, each corresponding to a wiki-page.
-    If page has transclusions and they need to be updated (with new label names),
-    calls edit_page() to edit transclusions and reports outcome in log.txt.
+    Checks if the pages in input have transclusions and if labels in those
+    transclusions need to be corrected.
 
-    Each dict must contain the following information about the wiki-page:
-    url - the API url of the wiki project
-    lang - language of the project
-    title - title of the page
-    labels - dict containing changed labels as {'old':'new'}.
+    Input:
+        data - list of dicts with the following items:
+            url     - API of the project
+            lang    - language of the project
+            title   - title of the page
+            labels  - dict with changed labels (key: old, value: new)
+
+    If page has transclusions and labels need to be updated, calls edit_page()
+    or edit_debug_mode() if we are in debug mode.
     """
     for page in data:
-        corrections = 0
+        edits = 0
         transclusions = get_transclusions(page['title'], page['url'])
         if not transclusions:
-            print(' No transclusions of "{}": PASS'.format(page['title']))
+            logging.info('[check_saved_data] No transclusions in [{}]. Pass.' \
+                .format(page['title']))
         else:
-            print(' Checking {} transclusion(s) of "{}"...'.format
-                (len(transclusions), page['title']))
+            logging.info('[check_saved_data] Found {} transclusions for [{}].' \
+                ' Checking...'.format(len(transclusions), page['title']))
             for transclusion in transclusions:
                 # Get source code of transcluding page
-                page_content = get_pagecontent(page['url'], transclusion)
-                if not page_content: # Means page not found
-                    print(' Error. Page not found. PASS')
-                else:
-                # Update lables in content if necessary
-                    page_content, corrected_labels = (fix_transclusion
-                        (page_content, page['title'], page['labels'],
-                        page['lang']))
-                    if page_content: # Means labels were updated
-                        set_status_on_wiki(page['url'], 'active')
-                        edit_sum, labels_sum = (compose_summary
-                            (corrected_labels, page['lang']))
+                tr_content = get_pagecontent(page['url'], transclusion[0])
+                if tr_content:
+                    # Update lables in content if necessary
+                    new_content, corrected_labels = fix_transclusion \
+                        (tr_content, page['title'],page['labels'],page['lang'])
+                    if new_content:
+                        # Means labels need to be updated
+                        edit_sum,labels_sum = compose_summary(corrected_labels,\
+                            page['lang'])
                         summary = '{} {}'.format(edit_sum, labels_sum)
-                        if DEBUG_MODE:
-                            edit_debug_mode(transclusion, labels_sum, page, lang, url)
+                        # TODO having both edit_sum and summary is a bit confusing
+                        if debug_mode:
+                            edited = edit_debug_mode(transclusion[1], page, \
+                                labels_sum)
+                            if edited:
+                                edits += 1
                         else:
-                            edit = edit_page(page['url'], transclusion,
-                                page_content, summary)
-                            if edit: # Means edit was succesful
-                                print(' 1 transclusion corrected! DONE')
-                                corrections += 1
-                    else: # Means no edit necessary
-                        print(' No corrections made. PASS')
-        # Update log
-        with open('log.txt', 'a') as file:
-            page_url = page['url'].replace('w/api.php', 'wiki/')
-            edit_sum,labels_sum = compose_summary(page['labels'], page['lang'])
-            log = ('\n\n{}:\n\n{}\n{}{}\n{}\n{} transclusion(s) found\n{}'
-                ' correction(s) made'.format(time.ctime(), page['title'],
-                page_url, page['title'], labels_sum[1:-1],
-                str(len(transclusions)), str(corrections)))
-            file.write(log)
-
-
-def edit_debug_mode(transclusion, labels_sum, page, lang, url):
-    parameters = {  'action': 'query',
-                    'prop': 'info',
-                    'inprop': 'url',
-                    'pageids': transclusion,
-                    'format': 'json',
-                    'utf8': '' }
-    try:
-        resp = (requests.get(url, params = parameters))
-    except:
-        print('Unable to get page info for debug mode edit')
-        return None
-    else:
-        if resp.status_code != 200:
-            #raise ApiError('GET /tasks/ {}'.format(resp.status_code))
-            print('ApiError')
-            return None
+                            edited = edit_page(page['url'], transclusion[0], \
+                                new_tr_content, summary)
+                            if edited:
+                                edits += 1
+                    else:
+                        # Means no edit necessary
+                        logging.info('[check_saved_data] No edit necessary in' \
+                            '[{}]. Skipping'.format(transclusion[1]))
+        # Update log for current page
+        if edits:
+            logging.info('[check_saved_data] Done checking [{}]. In total {} ' \
+            'corrections were made in {} transclusions.'.format(page['title'], \
+            edits,len(transclusions)))
         else:
-            # Get info about transcluding page
-            pid = [p for p in resp.json()['query']['pages'].keys()][0]
-            tr = resp.json()['query']['pages'][pid]
+            logging.info('[check_saved_data] Done checking [{}] with {} ' \
+                'transclusions. No corrections are necessary'.format \
+                (page['title'], len(transclusions)))
+    # Update log for current sessions
+    logging.info('[check_saved_data] Ending session. Checked transclusions of' \
+        ' {} pages.'.format(len(data)))
 
-            # Define data to write in file
-            write_data = []
-            write_data.append('\n\n<br/><br/>{}\n'.format(time.ctime()))
-            write_data.append('<b>{}</b>\n'.format(url.split('/')[2]))
-            write_data.append('Page to edit: <a href="{}">{}</a>\n'.format(tr['fullurl'],tr['title']))
-            write_data.append('Transcluded page: <a href="{}">{}</a>\n'.format(page['url'],page['title']))
-            write_data.append(labels_sum)
-            with open(DEBUG_LOG, 'a') as f:
-                f.write('<br/>'.join(write_data))
-            return True
+
+def edit_debug_mode(transclusion, page, labels_sum):
+    # Define data to write in file
+    write_data = []
+    # Timestamp
+    write_data.append('\n\n<br/><br/>{}\n'.format(time.ctime()))
+    # Url of the project
+    base_url = page['url'].split('/')[2]
+    write_data.append('<b>{}</b>\n'.format(base_url))
+    # Page with changed labels
+    original_page_url = 'https://{}/wiki/{}'.format(base_url,page['title'])
+    write_data.append('Original page: <a href="{}">{}</a>\n'.format \
+        (original_page_url,page['title']))
+    # Page that should be edited
+    target_page_url = 'https://{}/wiki/{}'.format(base_url,transclusion)
+    write_data.append('Page to edit: <a href="{}">{}</a>\n'.format \
+        (target_page_url,transclusion))
+    # Labels to be updated
+    write_data.append(labels_sum)
+    try:
+        with open(debug_fp, 'a') as f:
+            f.write('<br />'.join(write_data))
+    except:
+        logging.warning('[edit_debug_mode] Failed to edit debug_mode file '\
+            '[{}]'.format(debug_fp))
+        return False
+    else:
+        return True
 
 
 def set_status_on_wiki(url, status):
@@ -153,40 +180,48 @@ def set_status_on_wiki(url, status):
     Calls check_stopbutton() to update Stop button status.
     Will not edit if button is ON or status page is not created.
     """
-    user = username.split('@')[0]
-    page = 'User:' + user + '/status'
-    button_exists = check_stopbutton(url, page)
-    if button_exists and not stop_button and not DEBUG_MODE:
-        content = get_pagecontent(url, page)
-        status_template = '{{User:' + user + '/status/' + status + '}}'
-        already_set = False
-        for line in content.splitlines():
-            if status_template in line:
-                already_set = True
-        if not already_set:
-            summary = 'Setting bot status to {}.'.format(status) #TODO:localize
-            edit = edit_page(url, page, status_template, summary)
-            if edit: # Means edit was succes
-                print(summary)
+    if not debug_mode:
+        usr = user.split('@')[0]
+        page = 'User:' + usr + '/status'
+        button_exists = check_stopbutton(url, page)
+        if button_exists and not stop_button:
+            content = get_pagecontent(url, page)
+            status_template = '{{User:' + usr + '/status/' + status + '}}'
+            already_set = False
+            #TODO make sure template page exists and localize
+            if content:
+                for line in content.splitlines():
+                    if status_template in line:
+                        already_set = True
+            if not already_set:
+                #TODO localize summary
+                summary = 'Setting bot status to {}.'.format(status)
+                edit = edit_page(url, page, status_template, summary)
+                if edit: # Means edit was succes
+                    logging.info('[set_status_on_wiki] Set bot status to {} ' \
+                        'in subpage [{}]'.format(status.upper(), page))
 
 
 def check_stopbutton(url, page):
     """
     Check user status page to see if user is allowed to edit.
-    If the first line of the status page contains "stop", we consider this as
-    "Stop button". This way wiki-users can immediately stop the bot if it's
-    malfunctioning.
-    Returns true if status page exists, otherwise false.
+    If first line of the status page contains "stop", stop_button is ON.
+    This allows off-line control over the bot. If stop_botton is ON no edits
+    will be made.
+
+    Updates global stop_button.
+    Returns True if status page exists, otherwise False.
     """
     global stop_button
-    print('Checking user stop button...')
     content = get_pagecontent(url, page)
-    if not content: # Means page doesn't exist
+    # Page doesn't exist
+    if not content:
         stop_button = False
         return False
+    # Page exists and stop botton is ON
     elif 'stop' in content.splitlines()[0].lower():
-        print('stop button on')
         stop_button = True
+    # Stop botton is OFF
     else:
         stop_button = False
     return True
@@ -194,7 +229,8 @@ def check_stopbutton(url, page):
 
 def get_transclusions(title, url):
     """
-    Checks if page has transclusions. If yes, return their page IDs.
+    Checks if page has transclusions. Returns a list of tuples if so, otherwise
+    None. Tuple is pair of page-id and title.
     """
     parameters = {  'action': 'query',
                     'prop': 'transcludedin',
@@ -202,34 +238,47 @@ def get_transclusions(title, url):
                     'format': 'json',
                     'utf8': '',
                     'tinamespace': '*'} #TODO change ns to 0?
-    resp = (requests.get(url, params = parameters))
-
-    js = json.loads(resp.content.decode('utf-8'))
-    #TODO: throw keyerror when: js = {'batchcomplete': '',
-        #'warnings': {'main': {'*': 'Unrecognized parameter: pageid.'}}}
-    pid = [p for p in js['query']['pages'].keys()][0]
-    transclusions = js['query']['pages'][pid]
-    if 'transcludedin' in transclusions.keys():
-        return [page['pageid'] for page in transclusions['transcludedin']]
-    return None # Means no transclusions
+    try:
+        resp = (requests.get(url, params = parameters))
+        js = json.loads(resp.content.decode('utf-8'))
+        pid = [p for p in js['query']['pages'].keys()][0]
+        transclusions = js['query']['pages'][pid]
+    except:
+        logging.warning('[get_transclusions] Unable to get transcusions of ' \
+            '[{}]. Unexpected or no reply from API [{}]'.format(title,url))
+        return None
+    else:
+        if 'transcludedin' in transclusions.keys():
+            return [(page['pageid'],page['title']) for page in \
+                transclusions['transcludedin']]
+        return None
 
 
 def fix_transclusion(page_content, title, labels, lang):
     """
-    Checks if transclusion contains old label names and updates them.
-    Three transclusion styles are checked consecutively, although only the
-    first is widely used in wiki projects.
+    Checks if transclusion contains old labels and updates them in provided
+    page content. Three transclusion styles are checked consecutively, although
+    only the first is widely used in wiki projects.
 
     Regex is used to make sure that labels are corrected only where necessary
     (the page can for example transclude more than one pages).
 
-    Returns updated page content and a the labels that were corrected as two
-    values (string and dict).
+    Input:
+        page_content    - content of transcluding page
+        title           - title of transcluded page
+        changed labels  - labels that were changed in transcluded page
+        lang            - language of project
+
+    Returns:
+        Tuple         - if updates were made, tuple contains:
+            string    - updated page content
+            dict      - updated labels (key: old, value: new)
+        Both values will be None if no changes are necessary.
     """
     page_content = page_content.splitlines()
     title = clean_title(title) # Remove subpage and namespace from title
     corrected_labels = {}
-    edit = False
+    edited = False
 
     for line in page_content:
         if title in line:
@@ -251,7 +300,7 @@ def fix_transclusion(page_content, title, labels, lang):
                                 line, count=2))
                             page_content[index] = line
                             corrected_labels[label] = labels[label]
-                            edit = True
+                            edited = True
                             del match
 
             # Case 2: Mediawiki syntax
@@ -266,7 +315,7 @@ def fix_transclusion(page_content, title, labels, lang):
                                 (labels[label]), line)
                             page_content[index] = line
                             corrected_labels[label] = labels[label]
-                            edit = True
+                            edited = True
                             del match
 
             # Case 3: template used for transclusion
@@ -281,13 +330,13 @@ def fix_transclusion(page_content, title, labels, lang):
                                 (labels[label]), line))
                             page_content[index] = line
                             corrected_labels[label] = labels[label]
-                            edit = True
+                            edited = True
                             del match
 
     page_content = '\n'.join(page_content)
-    if edit == True:
+    if edited:
         return page_content, corrected_labels
-    return None, None # Means no edit in page necessary
+    return None, None
 
 
 def clean_title(title):
@@ -305,7 +354,12 @@ def clean_title(title):
 def get_pagecontent(url, page):
     """
     Retrieves page content with an API request to Wikimedia server.
-    Page can be either page title (string) or page ID (int).
+
+    Input:
+        url     - API of the project
+        page    - Can be either title (string) or ID (int).
+
+    Returns a single string if page exists, otherwise None.
     """
     parameters = {  'action': 'query',
                     'prop': 'revisions',
@@ -313,94 +367,156 @@ def get_pagecontent(url, page):
                     'format': 'json',
                     'utf8': '' }
 
-    # Check to see if 'page' is title or pageid
-    if type(page) == int:
+    # Is 'page' title or page id?
+    if type(page) is int:
         parameters['pageids'] = page
-    else:
+    elif type(page) is str:
         parameters['titles'] = page
-
-    resp = (requests.get(url, params = parameters))
-    if resp.status_code != 200:
-        raise ApiError('GET /tasks/ {}'.format(resp.status_code))
-    pid = [p for p in resp.json()['query']['pages'].keys()][0]
-    if pid == '-1': # Means page not found
+    else:
+        logging.warning('[get_pagecontent] Argument [{}] has invalid type ' \
+            '[{}]. Expected int or str'.format(page,type(page)))
         return None
-    content = resp.json()['query']['pages'][pid]['revisions'][0]['*']
-    return content
 
-
-def check_credentials():
-    """
-    Check if user credentials are imported from config file.
-    If not ask for input.
-    """
-    global username, password
-    # Ask for user login/password if necessary
-    if not username or not password:
-        username = input('Bot username: ')
-        password = getpass('Password: ')
+    try:
+        resp = requests.get(url, params = parameters)
+        resp_code = resp.status_code
+        js = json.loads(resp.content.decode('utf-8'))
+    except:
+        logging.warning('[get_pagecontent] Unable to get content of [{}]. ' \
+            'Unexpected or no reply from API [{}]. Response code: {}.' \
+            .format(page,url,resp_code if resp_code else 'None'))
+    else:
+        pid = [p for p in js['query']['pages'].keys()][0]
+        print(pid)
+        if 'revisions' in js['query']['pages'][pid].keys():
+            return js['query']['pages'][pid]['revisions'][0]['*']
+        else:
+            logging.warning('[get_pagecontent] Unable to get content of [{}].' \
+                ' API response: [{}]'.format(page,js['query']['pages'][pid]))
+            return None
 
 
 def edit_page(url, page, page_content, summary):
     """
-    Login and edit wiki-page with API request.
-    Returns true if edit was success, otherwise false.
+    Edit wiki-page using provided credentials.
+
+    Input:
+        url             - API of the project
+        page            - can be either title (string) or ID (int).
+        page_content    - string
+        summary         - string, edit summary
+
+    Returns:
+        True            - if edit was success
+        False           - edit didn't succeed
     """
+    set_status_on_wiki(url, 'active')
     if stop_button:
-        print('Stop button ON: Aborting all edits')
+        base_url = url.split('/')[2]
+        logging.info('[edit_page] Stop button is ON. No edits will be made '\
+            'until it is turned OFF again.'.format(base_url))
         return False
-    print(' logging in as {}...'.format(username))
+
+    # Continue in normal mode
+    logging.info('[edit_page] Preparing to edit page [{}] through API [{}]' \
+        .format(page,url))
     session = requests.Session()
 
-    # Request login token
+    # Step 1: Request login token
+    logging.info('[edit_page] Logging in as [{}] in [{}]'.format(user, url))
     params = {  'action': 'query',
                 'meta': 'tokens',
                 'type': 'login',
                 'format': 'json' }
-    resp = session.get(url, params = params)
-    resp.raise_for_status()
-    assert 'tokens' in resp.json()['query'], 'Failed to get login token'
+    try:
+        resp = session.get(url, params = params).json()
+    except:
+        logging.warning('[edit_page] Unable to get login token. Unexpected ' \
+            'or no API response: {}'.format(resp if resp else 'None'))
+        return False
+    else:
+        if not resp['query'] or not 'tokens' in resp['query']:
+            logging.warning('[edit_page] Login token request rejected. API ' \
+            'response: [{}]'.format(resp if resp else 'None'))
+            return False
+        login_token = resp['query']['tokens']['logintoken']
+        del resp
 
-    # Login
+    # Step 2: Login
     logindata = {'action': 'login',
                 'format': 'json',
-                'lgname': username,
-                'lgpassword': password,
-                'lgtoken': resp.json()['query']['tokens']['logintoken'] }
-    resp = session.post(url, data = logindata)
-    resp.raise_for_status()
-    assert resp.json()['login']['result'] == 'Success', 'Failed to log in'
+                'lgname': user,
+                'lgpassword': pssw,
+                'lgtoken': login_token }
+    try:
+        resp = session.post(url, data = logindata).json()
+    except:
+        logging.warning('[edit_page] Unable to login to project. Unexpected ' \
+            'or no API response: {}'.format(resp if resp else 'None'))
+        return False
+    else:
+        if not resp['login'] or resp['login']['result'] != 'Success':
+            logging.warning('[edit_page] Log-in request rejected. API ' \
+            'response: [{}]'.format(resp if resp else 'None'))
+            return False
+        del resp
 
-    # Request edit token
-    print(' getting edit token....')
+    # Step 3: Request edit token
+    logging.info('[edit_page] Getting edit token....')
     params['type'] = 'csrf'
-    resp = session.get(url, params = params)
-    resp.raise_for_status()
-    assert 'tokens' in resp.json()['query'], 'Failed to get edit token'
+    try:
+        resp = session.get(url, params = params).json()
+    except:
+        logging.warning('[edit_page] Unable to get edit token. Unexpected or' \
+            ' no API response: {}'.format(resp if resp else 'None'))
+        return False
+    else:
+        if not resp or not 'tokens' in resp['query']:
+            logging.warning('[edit_page] Edit token request rejected. API ' \
+                'response: [{}]'.format(resp if resp else 'None'))
+            return False
+        edit_token = resp['query']['tokens']['csrftoken']
+        del resp
 
-    # Edit page
+    # Step 4: Edit page
     editdata = {'action': 'edit',
                 'text': page_content,
                 'summary': summary,
                 'format': 'json',
-                'utf8': '', 'bot': 1,
-                'token': resp.json()['query']['tokens']['csrftoken'] }
-    if type(page) == int:
+                'utf8': '',
+                'bot': 1,
+                'token': edit_token }
+    if type(page) is int:
         editdata['pageid'] = page
-    else:
+    elif type(page) is str:
         editdata['title'] = page
-    resp = session.post(url, data = editdata)
-    resp.raise_for_status()
-    result = resp.json()['edit']['result']
-    assert result == 'Success', 'Failed to edit page'
-    if result == 'Success':
-        return True
-    return False
+    else:
+        logging.warning('[edit_page] Argument [{}] has invalid type [{}]. ' \
+            'Expected int or str. Aborting edit.'.format(page,type(page)))
+        return False
+
+    try:
+        resp = session.post(url, data = editdata).json()
+        result = resp['edit']['result']
+    except:
+        logging.warning('[edit_page] Edit request rejected. API response: [{}]'\
+            .format(resp if resp else 'None'))
+        return False
+    else:
+        if result == 'Success':
+            logging.info('[edit_page] Page [{}] edited successfully.'.format(page))
+            return True
+        else:
+            logging.warning('[edit_page] Edit of page [{}] failed. API ' \
+                'response: [{}]'.format(page, resp if resp else 'None'))
+            return False
 
 
 def compose_summary(labels, lang):
     """
     Generates summary in local language with the labels that were changed.
+
+    Returns tuple of two strings: edit_summary and changed labels
     """
     changes = []
     for old, new in zip(labels.keys(), labels.values()):

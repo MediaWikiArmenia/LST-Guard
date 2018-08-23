@@ -6,11 +6,9 @@ import sys
 from time import sleep
 from configparser import ConfigParser
 
-global redb, redb_host, redb_port, redb_id, proc_args, config_fp, debug_mode_fp
+global redb, redb_host, redb_port, redb_id, proc_args, config_fp
 config_fp = 'config.ini'
-debug_mode_fp = 'debug_edits.html'
-debug_mode = False
-proc_args = ['nohup', 'python3', 'dumb.py', config_fp, '&']
+proc_args = ['nohup', 'python3', 'app.py', config_fp, '&']
 
 
 __doc__ = """
@@ -54,7 +52,6 @@ EXAMPLES:
 # TODO add option to export Redis
 
 def run():
-    global debug_mode
     # Check command line option
     # Print usage and exit if not valid
     run_option = {  '-start':start_lstg,
@@ -142,11 +139,12 @@ def check_redis(data=None):
             print('No variables in Redis database.')
 
 
-def start_lstg(option=False):
+def start_lstg(debug_mode=False):
     print('Flushing Redis database.')
     redb.flushdb()
     if option in ('--debug','-d'):
-        proc_args.insert(4, debug_mode_fp)
+        debug_mode = True
+        proc_args.insert(4, True)
     subprocess.Popen(proc_args, stdin=subprocess.PIPE, stdout=subprocess.PIPE, \
         stderr=subprocess.PIPE )
     lock_redis()
@@ -155,8 +153,8 @@ def start_lstg(option=False):
     lock_redis(unlock=True)
     print('Starting LST-guard: lst_poller & lst_worker initiated.')
     if debug_mode:
-        print('Note: lst_worker runs in debug mode, edits will be saved in:' \
-            ' [{}].'.format(debug_mode_fp))
+        print('Note: lst_worker runs in debug mode, edits will be saved in ' \
+            'debug file. Check [lst_worker.py] for filepath.')
 
 
 def restart_lstg(debug_mode=False):
@@ -188,14 +186,15 @@ def get_status():
     print('\nProcesses:\tStatus:\nlst_poller\t{}\nlst_worker\t{}\n'.format \
         (poller.upper(),worker.upper()))
     if worker == 'running debug mode':
-        print('Note: lst_worker runs in debug mode, edits are saved in [{}].' \
-            .format(debug_mode_fp))
+        print('Note: lst_worker runs in debug mode. Check [lst_worker.py] for' \
+            ' filepath.')
 
 
 def check_config():
-    # TODO, if debug mode don't require usr/psw
     """
     Validate config.ini and return Redis db details that we need.
+    Exit if required variables are missing. Don't require username/password
+    if in debug mode.
     """
     missing_fields = {}
     required_fields = { 'run on':           ['project', 'languages'],

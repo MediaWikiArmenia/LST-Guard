@@ -4,7 +4,7 @@ import sys
 from multiprocessing import Process
 from configparser import ConfigParser
 import lst_poller
-import lst_repairer
+import lst_worker
 
 
 """
@@ -12,10 +12,10 @@ Expected arguments:
     Required:
         - config_fp
     Optional:
-        - debug_mode_fp
+        - debug_mode
 """
-global langs, proj, config_fp, dbg_fp, rdb
-config_fp = dbg_fp = None # initialize to avoid NameError
+global config_fp, debug_mode, rdb, langs, proj, usr, pssw
+config_fp = debug_mode = None # initialize to avoid NameError
 
 logging.basicConfig(
             filename='logs/app.log',
@@ -28,7 +28,7 @@ def run():
     load_config()
     logging.info('[RUN] Checked argv and config: OKAY.')
     Process(target=start_poller).start()
-    Process(target=start_repairer).start()
+    Process(target=start_worker).start()
 
 
 def set_args():
@@ -42,14 +42,14 @@ def set_args():
 
     Will terminate if arguments are invalid.
     """
-    global config_fp, dbg_fp
+    global config_fp, debug_mode
     # Allow only 1 or 2 arguments
     if len(sys.argv) == 2 or len(sys.argv) == 3:
         # first argument is config file
         config_fp = sys.argv[1]
         # second argument (optional) is debug mode file
         if len(sys.argv) == 3:
-            dbg_fp = sys.argv[2]
+            debug_mode = sys.argv[2]
     else:
         if len(sys.argv) < 2:
             logging.warning('[SET_ARGS] Too few arguments [{}]. 2 or 3 ' \
@@ -66,10 +66,10 @@ def start_poller():
     lst_poller.run(proj, langs, rdb)
 
 
-def start_repairer():
-    logging.info('[START_REPAIRER] Starting repairer in {} mode'.format \
-        ('DEBUG' if dbg_fp else 'normal'))
-    lst_repairer.run(dbg_fp, rdb)
+def start_worker():
+    logging.info('[START_worker] Starting worker in {} mode'.format \
+        ('DEBUG' if debug_mode else 'normal'))
+    lst_worker.run(rdb, debug_mode, usr pssw)
 
 
 def load_config():
@@ -83,7 +83,7 @@ def load_config():
 
     Will terminate if options are invalid.
     """
-    global langs, proj, rdb
+    global langs, proj, usr, pssw, rdb
     try:
         config = ConfigParser()
         config.read_file(open(config_fp))
@@ -102,6 +102,8 @@ def load_config():
             port = config.get('redis database', 'port')
             id = config.get('redis database', 'db')
             rdb = (host, port, id)
+            usr = config.get('credentials', 'username')
+            pssw = config.get('credentials', 'password')
         except:
             logging.warning('[LOAD_CONFIG] Unable to load required data from ' \
                 'config [{}]. Terminating'.format(config_fp))

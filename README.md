@@ -1,7 +1,7 @@
 
 # LST-Guard
 
-LST-Guard watches recent changes in Wikimedia projects and catches edits that may cause broken links in ([transclusion](https://en.wikipedia.org/wiki/Transclusion)) pages. This is done by one process (`lst_poller`) catching and saving all changed section labels and the second process (`lst_repairer`) checking if those result in broken transclusions and if so, updating the section labels in pages where they are transcluded.
+LST-Guard watches recent changes in Wikimedia projects and catches edits that may cause broken links in ([transclusion](https://en.wikipedia.org/wiki/Transclusion)) pages. This is done by one process (`lst_poller`) catching and saving all changed section labels and the second process (`lst_worker`) checking if those result in broken transclusions and if so, updating the section labels in pages where they are transcluded.
 
 ## Table of Contents
 
@@ -27,9 +27,9 @@ This repository contains:
 
 1. [config.ini](config.ini) - contains options for running the program, as well credentials of as a Wikimedia user (bot) to edit pages. (See details below.)
 2. [lst_manager.py](lest_manager.py) - manage and monitor the program.
-3. [app.py](app.py) - runs `lst_poller` and `lst_repairer` in the background.
+3. [app.py](app.py) - runs `lst_poller` and `lst_worker` in the background.
 4. [lst_poller.py](lst_poller.py) - detects changed section labels and stores them in Redis.
-5. [lst_repairer.py](lst_repairer.py) - checks stored labels and corrects transclusions if necessary.
+5. [lst_worker.py](lst_worker.py) - checks stored labels and corrects transclusions if necessary.
 6. [localizations.py](localizations.py) - syntax details and other language-specific data used to extract label names.
 7. [requirements.txt](requirements.txt) - list of dependencies necessary to run this program.
 
@@ -37,7 +37,7 @@ This repository contains:
 
 LST-Guard consists of two background processes: `lst_poller` constantly watches recent changes in a Wikimedia project reading the _[EventStreams](https://wikitech.wikimedia.org/wiki/EventStreams)_ feed, detects changed section labels and stores them to be checked later. It filters out edits in `project` (usually Wikisource), in `languages` (defined in `config.ini`) and in [namespace](https://en.wikisource.org/wiki/Help:Namespaces) `104` (_Pages:_). Consequently it checks if section labels have been changed in these edits. If yes, old and new labels, page and edit info is stored in the Redis database.
 
-The second process, `lst_repairer`, runs only on intervals (5 minutes by default). If there is new data in Redis, it checks if any sections of the edited page is transcluded in other _content_ pages (namespace `1`) and if they are not updated manually, it will replace old labels with new labels.
+The second process, `lst_worker`, runs only on intervals (5 minutes by default). If there is new data in Redis, it checks if any sections of the edited page is transcluded in other _content_ pages (namespace `1`) and if they are not updated manually, it will replace old labels with new labels.
 
 Both modules are called into life by `app.py`. It is preferable not to execute this module directly, but to use `lst_manager.py` instead.
 
@@ -50,7 +50,7 @@ Every time a page is edited, `lst_poller` compares the old and new revision text
 ```
 When the number of section labels in the old and new versions are the same, it will assume that they correspond to each other.
 
-When it comes to correcting these labels in transclusions, `lst_repairer` has to recognize three different syntaxes (again: including localizations and minor syntactic variations):
+When it comes to correcting these labels in transclusions, `lst_worker` has to recognize three different syntaxes (again: including localizations and minor syntactic variations):
 
 1. HTML syntax:
 ```html
@@ -74,7 +74,7 @@ Here is an example when editing sectoin labels causes a broken transclusion and 
 1. in a Wikisource page the section label `s1` has [is changed](https://en.wikisource.org/w/index.php?title=Page:EB1911_-_Volume_15.djvu/536&diff=7006224&oldid=6576545) to `Jordan, Dorothea` by an editor.
 2. the article where this section was transcluded [lost its content](https://en.wikisource.org/w/index.php?title=1911_Encyclop%C3%A6dia_Britannica/Jordan,_Wilhelm&oldid=6576548)
 3. `lst_poller` detects the change in label name in the original page
-4. `lst_repairer` [corrects](https://en.wikisource.org/w/index.php?title=1911_Encyclop%C3%A6dia_Britannica/Jordan,_Wilhelm&diff=next&oldid=6576548) the label in the transcluding article
+4. `lst_worker` [corrects](https://en.wikisource.org/w/index.php?title=1911_Encyclop%C3%A6dia_Britannica/Jordan,_Wilhelm&diff=next&oldid=6576548) the label in the transcluding article
 
 ## Supported languages
 
@@ -129,7 +129,7 @@ $ ./lst_manager.py -start
 Check: Redis DB running OK (host: localhost, port: 7777, db: 0)
 Check: config file [config.ini]: Success.
 Flushing Redis database.
-Starting LST-guard: lst_poller & lst_repairer initiated.
+Starting LST-guard: lst_poller & lst_worker initiated.
 $
 ```
 
@@ -145,7 +145,7 @@ An example output could be:
 ```sh
 LST-Guard processes:
 lst_poller:	  RUNNING
-lst_repairer:	RUNNING
+lst_worker:	RUNNING
 
 ```
 
