@@ -239,7 +239,6 @@ def check_config():
                         missing_fields[section] = missing_fields.get(section,[]) + [param]
         # Print warnings
         if missing_fields:
-            print(missing_fields)
             if not require_credentials and list(missing_fields.keys()) == ['credentials']:
                 print('Warning: credentials missing from config (not required for this operation).')
             else:
